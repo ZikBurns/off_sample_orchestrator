@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import threading
 from threading import Thread
 import os
+import shutil
 import concurrent
 from concurrent import futures
 from queue import Queue
@@ -19,11 +20,11 @@ from .constants import MIN_PORT, MAX_PORT, MAX_JOB_MANAGERS, MAX_TASK_MANAGERS, 
     ORCHESTRATOR_BACKENDS, EC2_HOST_MACHINE, OUTPUT_STORAGE, DEFAULT_TASK_MANAGER_CONFIG, EC2_METADATA_SERVICE, \
     SPECULATIVE_EXECUTION, SPECULATION_MULTIPLIER, SPECULATION_QUARTILE, SPECULATION_INTERVAL_MS, MAX_SPLIT_RETRIES, \
     LOGGING_FORMAT, SPECULATION_ADD_TASK_MANAGER, DEFAULT_TASK_MANAGERS, DEFAULT_SPLIT_SIZE, AWS_LAMBDA_BACKEND, \
-    LOCAL_BACKEND, EXCEPTION_PERCENTAGE, DELAY_PERCENTAGE, DELAY_MAX, KEEP_ALIVE_INTERVAL, KEEP_ALIVE
+    LOCAL_BACKEND, EXCEPTION_PERCENTAGE, DELAY_PERCENTAGE, DELAY_MAX, KEEP_ALIVE_INTERVAL, KEEP_ALIVE, LOCAL_MODEL_PATH
 from .job_policies import default_job_policy
 
-
 logger = logging.getLogger()
+
 
 class Job:
     '''
@@ -46,14 +47,15 @@ class Job:
     :param speculation_interval_ms: int. The interval for speculative execution
     :param max_split_retries: int. The maximum number of retries for a split
     '''
-    def __init__(self, 
-                 input:list,
-                 job_name:str=None,
-                 bucket:str=None,
-                 split_size:int=None,
-                 num_task_managers:int=None,
-                 dynamic_split:bool=DYNAMIC_SPLIT,
-                 ip:str=None,
+
+    def __init__(self,
+                 input: list,
+                 job_name: str = None,
+                 bucket: str = None,
+                 split_size: int = None,
+                 num_task_managers: int = None,
+                 dynamic_split: bool = DYNAMIC_SPLIT,
+                 ip: str = None,
                  task_manager_config: dict = DEFAULT_TASK_MANAGER_CONFIG,
                  orchestrator_backend: str = DEFAULT_ORCHESTRATOR,
                  output_storage: str = None,
@@ -80,11 +82,11 @@ class Job:
         self.num_task_managers = num_task_managers
         self.output = None
         self.orchestrator_stats = {
-                                    "created": time.time(),
-                                    "assigned": None,
-                                    "started": None, 
-                                    "finished": None
-                                   }
+            "created": time.time(),
+            "assigned": None,
+            "started": None,
+            "finished": None
+        }
         self.dynamic_split = dynamic_split
         self.ec2_metadata = None
         self.task_manager_config = task_manager_config
@@ -117,7 +119,6 @@ class Job:
         self.delay_max = delay_max
         self.extra_task_managers = 0
         self.extra_invoke_output = None
-
 
     def to_dict(self):
         '''
@@ -152,7 +153,6 @@ class Job:
         }
 
 
-
 class ResourceProvisioner():
     '''
     Class that represents the resource provisioner for the orchestrator.
@@ -161,6 +161,7 @@ class ResourceProvisioner():
     :param max_job_managers: int. The maximum number of job managers to be used. The orchestrator will not exceed this number, it has the priority.
     :param max_task_managers: int. The maximum number of task managers. The orchestrator will not exceed this number, it has the priority.
     '''
+
     def __init__(self, job_policy, max_job_managers: int = 1, max_task_managers: int = 1):
         self.job_policy = job_policy
         self.max_job_managers = max_job_managers
@@ -175,7 +176,8 @@ class ResourceProvisioner():
         '''
         self.count_task_managers += num_task_managers
         self.count_job_managers += 1
-        logging.info(f"Incrementing count. Now {self.count_task_managers} task managers and {self.count_job_managers} job managers.")
+        logging.info(
+            f"Incrementing count. Now {self.count_task_managers} task managers and {self.count_job_managers} job managers.")
 
     def decrement_count(self, num_task_managers):
         '''
@@ -183,7 +185,8 @@ class ResourceProvisioner():
         '''
         self.count_task_managers -= num_task_managers
         self.count_job_managers -= 1
-        logging.info(f"Decrementing count. Now {self.count_task_managers} task managers and {self.count_job_managers} job managers.")
+        logging.info(
+            f"Decrementing count. Now {self.count_task_managers} task managers and {self.count_job_managers} job managers.")
 
     def check_available_resources(self, job):
         '''
@@ -193,13 +196,15 @@ class ResourceProvisioner():
         '''
         logging.info(
             f"Available resources: ({self.count_task_managers}/{self.max_task_managers}) task managers and ({self.count_job_managers}/{self.max_job_managers}) job managers.")
-        num_task_managers=job.num_task_managers
+        num_task_managers = job.num_task_managers
         if self.count_job_managers < self.max_job_managers and self.count_task_managers < self.max_task_managers:
             if self.count_task_managers + num_task_managers <= self.max_task_managers:
-                logging.info(f"Adding {num_task_managers} task managers will not exceed the maximum number of task managers {self.max_task_managers}.")
+                logging.info(
+                    f"Adding {num_task_managers} task managers will not exceed the maximum number of task managers {self.max_task_managers}.")
                 return True
             else:
-                logging.info(f"Adding {num_task_managers} task managers will exceed the maximum number of task managers {self.max_task_managers}.")
+                logging.info(
+                    f"Adding {num_task_managers} task managers will exceed the maximum number of task managers {self.max_task_managers}.")
                 return False
         else:
             logging.info(f"Maximum number of task managers {self.max_task_managers} reached. No available resources.")
@@ -240,7 +245,6 @@ class ResourceProvisioner():
         job = self.job_policy(job)
         return job
 
-
     def local_invoke(self, payload: dict):
         '''
         Calls the local function with the payload.
@@ -251,14 +255,16 @@ class ResourceProvisioner():
         escaped_json_payload = json_payload.replace('"', '\\"')
         try:
             logger.info(f"Calling local function with payload: {escaped_json_payload}")
-            process = subprocess.Popen(f'python {LOCAL_FUNCTION} "{escaped_json_payload}"', stdout=subprocess.PIPE, shell=True)
+            process = subprocess.Popen(f'python {LOCAL_FUNCTION} "{escaped_json_payload}"', stdout=subprocess.PIPE,
+                                       shell=True)
             output, error = process.communicate(timeout=None)
             logger.debug("Local function finished.")
         except Exception as e:
             logger.error(f"Error calling local function: {e}")
             return e
         try:
-            local_result = output.decode('utf-8').replace("'", '"').replace('"{', '{"').replace('}"', '"}').replace('""', '"').replace("None", "null")
+            local_result = output.decode('utf-8').replace("'", '"').replace('"{', '{"').replace('}"', '"}').replace(
+                '""', '"').replace("None", "null")
             local_result = json.loads(local_result)
             return local_result
         except Exception as e:
@@ -279,7 +285,6 @@ class ResourceProvisioner():
         futures = [thread_pool.submit(self.local_invoke, payload) for payload in payloads]
         return futures
 
-
     def local_wait_futures(self, futures: list):
         '''
         Waits for the futures of the local task managers.
@@ -294,8 +299,7 @@ class ResourceProvisioner():
         logger.info(f"Retrieved results from {num_task_managers} local task managers")
         return results
 
-
-    def lithops_call(self, fexec: FunctionExecutor, payloads: list, exception_str:bool=True):
+    def lithops_call(self, fexec: FunctionExecutor, payloads: list, exception_str: bool = True):
         '''
         Calls map_async of lithops with the payloads
         :param fexec: FunctionExecutor. The lithops function executor
@@ -310,7 +314,7 @@ class ResourceProvisioner():
             for payload in payloads:
                 payload_list.append({'payload': payload})
             logger.info(f"Calling {num_task_managers} task managers.")
-            futures = fexec.map_async(map_iterdata = payload_list)
+            futures = fexec.map_async(map_iterdata=payload_list)
             return futures
         except Exception as e:
             if exception_str:
@@ -319,10 +323,12 @@ class ResourceProvisioner():
                 except Exception as e2:
                     pass
             logger.error(f"Error in lithops call: {e}")
-            logger.error(f"Depending on the error, you may need to redeploy the runtime. Use the redeploy_runtime method of the orchestrator.")
+            logger.error(
+                f"Depending on the error, you may need to redeploy the runtime. Use the redeploy_runtime method of the orchestrator.")
             return e
 
-    def lithops_wait_futures(self, fexec: FunctionExecutor, futures: list, timeout:int =None, exception_str:bool=True):
+    def lithops_wait_futures(self, fexec: FunctionExecutor, futures: list, timeout: int = None,
+                             exception_str: bool = True):
         '''
         Waits for the futures of the task managers.
         :param fexec: FunctionExecutor. The function executor to be used
@@ -344,9 +350,11 @@ class ResourceProvisioner():
         except Exception as e:
             if exception_str:
                 e = str(e)
-            lithops_results = {'lithops_results': results, 'lithops_stats': None, 'lithops_config': fexec.config, 'error': e}
+            lithops_results = {'lithops_results': results, 'lithops_stats': None, 'lithops_config': fexec.config,
+                               'error': e}
             logger.error(f"Error in lithops call: {e}")
-            logger.error(f"Depending on the error, you may need to redeploy the runtime. Use the redeploy_runtime method of the orchestrator.")
+            logger.error(
+                f"Depending on the error, you may need to redeploy the runtime. Use the redeploy_runtime method of the orchestrator.")
         return lithops_results
 
     # def get_billed_duration(self, fexec, futures):
@@ -355,9 +363,7 @@ class ResourceProvisioner():
     #     except Exception as e:
     #         logger.error(f"Error getting billed duration: {e}")
 
-
-
-    def call(self, fexec, payloads:list):
+    def call(self, fexec, payloads: list):
         '''
         Calls the function executor with the payloads. If the function executor is not provided, it calls the local function.
         :param fexec: FunctionExecutor. The function executor to be used
@@ -379,8 +385,7 @@ class ResourceProvisioner():
         else:
             return self.local_wait_futures(futures=futures)
 
-
-    def invoke(self, fexec, payloads:list):
+    def invoke(self, fexec, payloads: list):
         """
         Invokes the function executor with the payloads. If the function executor is not provided, it calls the local function.
         :param fexec: FunctionExecutor. The function executor to be used
@@ -423,8 +428,6 @@ class ResourceProvisioner():
         # Print the json to the logger
         logger.info(json.dumps(job.to_dict()))
         return True
-
-
 
     def get_ec2_metadata(self):
         '''
@@ -473,6 +476,7 @@ class Split():
     :param output: dict. The output of the split
     :param retries_count: int. The number of retries of the split
     '''
+
     def __init__(self, SID: str, split: list):
         self.SID = SID
         self.split = split
@@ -510,10 +514,12 @@ class Split():
             "retries_count": self.retries_count
         }
 
+
 class ThreadSafeDict:
     '''
     Class that represents a thread-safe dictionary.
     '''
+
     def __init__(self):
         self.dict = {}
         self.lock = threading.Lock()
@@ -653,6 +659,7 @@ class ThreadSafeList():
         with self._lock:
             return self._list
 
+
 class Speculator():
     '''
     Class that represents the speculator for the orchestrator.
@@ -661,6 +668,7 @@ class Speculator():
     :param speculation_quartile: float. The quartile for speculative execution
     :param speculation_interval: int. The interval for speculative execution
     '''
+
     def __init__(self, job_manager, speculation_multiplier, speculation_quartile, speculation_interval):
         self.job_manager = job_manager
         self.speculation_multiplier = speculation_multiplier
@@ -670,7 +678,6 @@ class Speculator():
         self.tid_check_dict = ThreadSafeDict()
         for tid in range(self.job_manager.job.num_task_managers):
             self.tid_check_dict.update(str(tid + 1), 0)
-
 
     def speculate(self):
         """
@@ -692,14 +699,14 @@ class Speculator():
                 start_time = split.start_time
                 end_time = split.end_time
                 tid_times.append((end_time - start_time))
-            
+
             # Get median time of execution
             median_time = sorted(tid_times)[len(tid_times) // 2]
 
             # Order the tid_check_dict by the time of the last check
             self.tid_check_dict.sort()
             tids = self.tid_check_dict.to_list()
-            
+
             # For each TID
             for tid in tids:
                 tid_last_time = self.tid_check_dict.get(tid)
@@ -713,7 +720,7 @@ class Speculator():
                             split_copy = self.job_manager.split_controller.create_copy(sid)
                             if split_copy:
                                 self.job_manager.split_controller.put_split_pending(split_copy)
-                                if SPECULATION_ADD_TASK_MANAGER and split_copy.retries_count <= 1 :
+                                if SPECULATION_ADD_TASK_MANAGER and split_copy.retries_count <= 1:
                                     self.job_manager.add_extra_task_executors(1)
                             else:
                                 logger.debug(f"Split reached maximum retries.")
@@ -760,6 +767,7 @@ class SplitEnumerator(SPLITRPCServicer):
     Class that represents the split enumerator for the orchestrator.
     :param job_manager: JobManager. The job manager to be used
     '''
+
     def __init__(self, job_manager):
         """
         Constructor for the SplitEnumerator class
@@ -786,10 +794,10 @@ class SplitEnumerator(SPLITRPCServicer):
             if result.key:
                 outputs.update({result.key: result_value_dict})
         return outputs
-    
+
     def pop_running_split(self, request_sid, outputs):
         '''
-        Ends the running split by poping it from the running splits. 
+        Ends the running split by poping it from the running splits.
         :param request_sid: str. The SID of the request
         :param outputs: dict. The outputs of the request
         :return: Split. The split that was ended
@@ -833,8 +841,6 @@ class SplitEnumerator(SPLITRPCServicer):
             self.job_manager.split_controller.done_splits.update(request_sid, done_split)
             logger.info(f"Split {request_sid} done. Time: {done_split.end_time - done_split.start_time} seconds")
 
-
-
     def Assign(self, request, context):
         '''
         Assigns the split to the task manager.
@@ -848,12 +854,11 @@ class SplitEnumerator(SPLITRPCServicer):
             logger.debug(f"Keep alive from TID {request.tid}")
             return splitResponse(inputs=[], sid=None)
 
-
         # If the request carries a finished split
         sids = self.job_manager.split_controller.running_splits.to_list()
         logger.debug(f"Running splits when requested: {sids}")
 
-        #If the request carries outputs
+        # If the request carries outputs
         if request.outputs and request.sid:
             outputs = self.get_outputs_request(request)
             done_split = self.pop_running_split(request.sid, outputs)
@@ -888,6 +893,7 @@ class SplitEnumerator(SPLITRPCServicer):
             logger.debug(f"Running Task Managers: {tids}")
             return splitResponse(inputs=[], sid=None)
 
+
 class SplitController():
     '''
     Class with the structures and operations to handle the three states of the splits: pending, running and done.
@@ -895,12 +901,13 @@ class SplitController():
     :param split_size: int. The size of the splits
     :param max_split_retries: int. The maximum number of retries for a split
     '''
+
     def __init__(self, job_input, split_size, max_split_retries):
         self.pending_queue = Queue()
         self.running_splits = ThreadSafeDict()
         self.done_splits = ThreadSafeDict()
         split_inputs = [job_input[i:i + split_size] for i in range(0, len(job_input), split_size)]
-        self.splits = [Split(str(i+1), split) for i, split in enumerate(split_inputs)]
+        self.splits = [Split(str(i + 1), split) for i, split in enumerate(split_inputs)]
         self.split_size = split_size
         self.max_split_retries = max_split_retries
         logger.info(f"Created {len(self.splits)} splits with size {split_size}")
@@ -929,7 +936,6 @@ class SplitController():
             logger.info(f"All splits finished. Done splits: {done_splits}/{len(self.splits)}")
             return True
 
-
     def create_copy(self, sid):
         '''
         Creates a copy of a split if it is already in the running splits. If the split has already been retried the maximum number of times, it returns None.
@@ -944,7 +950,8 @@ class SplitController():
             current_retries_count = split.retries_count
             # Create a new SID for the copy.
             new_sid = f"{str(int(split.SID))}_{current_retries_count}"
-            logger.info(f"Split {split.SID} is already in the running splits. Creating a copy of the split with SID {new_sid} (retry {split.retries_count}).")
+            logger.info(
+                f"Split {split.SID} is already in the running splits. Creating a copy of the split with SID {new_sid} (retry {split.retries_count}).")
             new_split = Split(new_sid, split.split)
             new_split.retries_count = current_retries_count
             return new_split
@@ -1007,21 +1014,22 @@ class SplitController():
         self.pending_queue.put(split)
         logger.info(f"Split {sid} moved from running to pending queue")
 
+
 class JobManager:
     def __init__(self,
-            fexec_args: dict,
-            job: Job,
-            resource_provisioner: ResourceProvisioner,
-            split_enumerator_thread_pool_size: int,
-            split_enumerator_port: int,
-        ):
+                 fexec_args: dict,
+                 job: Job,
+                 resource_provisioner: ResourceProvisioner,
+                 split_enumerator_thread_pool_size: int,
+                 split_enumerator_port: int,
+                 ):
         self.fexec_args = fexec_args
         self.job = job
         self.resource_provisioner = resource_provisioner
         self.split_enumerator_thread_pool_size = split_enumerator_thread_pool_size
         self.split_enumerator_port = split_enumerator_port
         self.split_controller = None
-        self.server_thread=None
+        self.server_thread = None
         self.running_server_flag = None
         self.stop_server_flag = None
         self.extra_futures = None
@@ -1063,7 +1071,7 @@ class JobManager:
         The payload is a list of dictionaries, each dictionary containing the information for a task manager.
         The information includes the task manager ID, the IP, the port, the configuration, the flag to raise an exception and the delay for the task manager.
         """
-        tids=list(range(self.job.num_task_managers))
+        tids = list(range(self.job.num_task_managers))
         num_trues = int(len(tids) * self.job.exception_percentage / 100)
         random_list = [True] * num_trues + [False] * (len(tids) - num_trues)
         random.shuffle(random_list)
@@ -1076,14 +1084,14 @@ class JobManager:
         for i in range(len(tids)):
             payload = {'body':
                 {
-                    'tid': str(tids[i]+1),
+                    'tid': str(tids[i] + 1),
                     'ip': self.job.ip,
                     'port': self.split_enumerator_port,
                     'keep_alive': KEEP_ALIVE,
                     'keep_alive_interval': KEEP_ALIVE_INTERVAL,
                     'config': self.job.task_manager_config,
-                    'to_raise_exception':random_list[i],
-                    'to_delay':delay_list[i]
+                    'to_raise_exception': random_list[i],
+                    'to_delay': delay_list[i]
                 }
             }
             if self.job.orchestrator_backend != "local":
@@ -1096,6 +1104,7 @@ class JobManager:
         Builds the payload for the static split.
         The payload is a list of dictionaries, each dictionary containing the inputs for each task manager.
         """
+
         def divide_dict_into_chunks(items, num_chunks):
             chunk_size = len(items) // num_chunks
             remainder = len(items) % num_chunks
@@ -1161,7 +1170,6 @@ class JobManager:
             times.update({split: {"start_time": split.start_time, "end_time": split.end_time}})
         return times
 
-
     def initialize_dynamic_job(self):
         """
         Initializes the dynamic job. It sets the IP of the job and initializes the split controller and the extra futures.
@@ -1185,13 +1193,13 @@ class JobManager:
                                self.split_controller.done_splits.to_list()]
         self.job.invoke_output = invoke_output
 
-
     def add_extra_task_executors(self, num_extra_task_managers):
         """
         Adds extra task managers to the job updates and adds the futures of the extra task managers to the extra futures.
         """
         logger.info(f"Adding {num_extra_task_managers} extra task managers.")
-        logger.info(f"New TIDs: {list(range(self.job.num_task_managers+1, self.job.num_task_managers + num_extra_task_managers+1))}")
+        logger.info(
+            f"New TIDs: {list(range(self.job.num_task_managers + 1, self.job.num_task_managers + num_extra_task_managers + 1))}")
         payload_list = []
         for tid in range(self.job.num_task_managers, self.job.num_task_managers + num_extra_task_managers):
             payload = {'body':
@@ -1218,8 +1226,6 @@ class JobManager:
         self.job.extra_task_managers = len(list_of_futures)
         return invoke_output
 
-
-
     def run(self):
         self.job.orchestrator_stats["assigned"] = time.time()
 
@@ -1230,6 +1236,11 @@ class JobManager:
             self.fexec = FunctionExecutor(**self.fexec_args)
             if not self.job.bucket:
                 self.job.bucket = self.fexec.config['aws_s3']['storage_bucket']
+        else:
+            os.makedirs('/tmp/off_sample_orchestrator/', exist_ok=True)
+            # split directory from file in LOCAL_MODEL_PATH
+            directory, filename = os.path.split(LOCAL_MODEL_PATH)
+            shutil.copyfile(LOCAL_MODEL_PATH, f'/tmp/off_sample_orchestrator/{filename}')
 
         payload = self.build_payload()
         self.job.orchestrator_stats["started"] = time.time()
@@ -1247,9 +1258,9 @@ class JobManager:
 
         self.job.orchestrator_stats["finished"] = time.time()
         self.resource_provisioner.save_output(self.fexec, self.job)
+        if self.job.orchestrator_backend == "local":
+            os.remove('/tmp/off_sample_orchestrator/model.pt')
         return self.job.to_dict()
-
-
 
 
 class LearningPlane():
@@ -1257,11 +1268,13 @@ class LearningPlane():
     LearningPlane WILL BE the intelligence behind the orchestrator.
     At the moment it only assigns the split_size and num_task_managers based on the input size.
     '''
+
     def __init__(self):
         pass
 
     def update(self):
         pass
+
 
 class Orchestrator:
     """
@@ -1282,11 +1295,12 @@ class Orchestrator:
     :param logging_level: int. The logging level
     :param job_pool_executor: Executor. The executor to be used in the job pool
     """
+
     def __init__(self,
                  fexec_args: dict = None,
                  orchestrator_backends: list = ORCHESTRATOR_BACKENDS,
                  initialize=True,
-                 job_policy = default_job_policy,
+                 job_policy=default_job_policy,
                  ec2_host_machine: bool = EC2_HOST_MACHINE,
                  max_job_managers=MAX_JOB_MANAGERS,
                  max_task_managers=MAX_TASK_MANAGERS,
@@ -1294,7 +1308,7 @@ class Orchestrator:
                  max_port=MAX_PORT,
                  split_enumerator_thread_pool_size: int = SPLIT_ENUMERATOR_THREAD_POOL_SIZE,
                  logging_level=logging.INFO,
-                 job_pool_executor = ProcessPoolExecutor()
+                 job_pool_executor=ProcessPoolExecutor()
                  ):
         # Set the logger configuration
         logging.basicConfig(
@@ -1305,7 +1319,8 @@ class Orchestrator:
 
         # check if orchestrator_backend is valid
         if all(backend not in ORCHESTRATOR_BACKENDS for backend in orchestrator_backends):
-            raise ValueError(f"Invalid orchestrator_backend: {orchestrator_backends}. Must be of {ORCHESTRATOR_BACKENDS}")
+            raise ValueError(
+                f"Invalid orchestrator_backend: {orchestrator_backends}. Must be of {ORCHESTRATOR_BACKENDS}")
         self.orchestrator_backends = orchestrator_backends
 
         # Check if the port range is valid
@@ -1317,7 +1332,8 @@ class Orchestrator:
 
         # Check if the thread pool size is valid
         if split_enumerator_thread_pool_size < 1:
-            raise ValueError(f"Invalid split_enumerator_thread_pool_size: {split_enumerator_thread_pool_size}. Must be greater than 0")
+            raise ValueError(
+                f"Invalid split_enumerator_thread_pool_size: {split_enumerator_thread_pool_size}. Must be greater than 0")
         self.split_enumerator_thread_pool_size = split_enumerator_thread_pool_size
 
         # Check if the max_job_managers is valid
@@ -1329,7 +1345,7 @@ class Orchestrator:
             raise ValueError(f"Invalid max_task_managers: {max_task_managers}. Must be greater than 0")
 
         # Initialize the ResourceProvisioner
-        self.resource_provisioner = ResourceProvisioner(job_policy,max_job_managers, max_task_managers )
+        self.resource_provisioner = ResourceProvisioner(job_policy, max_job_managers, max_task_managers)
 
         self.fexec_args = fexec_args
         if AWS_LAMBDA_BACKEND in orchestrator_backends:
@@ -1338,7 +1354,7 @@ class Orchestrator:
 
                 logger.info(f"EC2 metadata: {self.ec_2_metadata}")
                 self.fexec_args['vpc'] = {'subnets': [self.ec_2_metadata['subnet_id']],
-                                     'security_groups': [self.ec_2_metadata['security_group_id']]}
+                                          'security_groups': [self.ec_2_metadata['security_group_id']]}
             else:
                 self.ec_2_metadata = None
 
@@ -1374,8 +1390,10 @@ class Orchestrator:
             if double_check:
                 logger.info(f"Runtime {fexec.backend} found.")
                 logger.info(f'Testing call')
-                lithops_futures = self.resource_provisioner.lithops_call(fexec, payloads= [{'body': {'do_nothing': True}}])
-                lithops_results = self.resource_provisioner.lithops_wait_futures(fexec, futures=lithops_futures, timeout=30, exception_str= False)
+                lithops_futures = self.resource_provisioner.lithops_call(fexec,
+                                                                         payloads=[{'body': {'do_nothing': True}}])
+                lithops_results = self.resource_provisioner.lithops_wait_futures(fexec, futures=lithops_futures,
+                                                                                 timeout=30, exception_str=False)
                 if isinstance(lithops_results, Exception):
                     logger.info(f"Runtime {fexec.backend} found but not working.")
                     return False
@@ -1416,15 +1434,13 @@ class Orchestrator:
             # Remove the included_function directory
             shutil.rmtree(f"{cwd}/included_function")
 
-
     def delete_runtime(self):
         '''
         Deletes the runtime.
         '''
         fexec = FunctionExecutor(**self.fexec_args)
         fexec.compute_handler.delete_runtime(fexec.config['aws_lambda']['runtime'],
-                                                fexec.config['aws_lambda']['runtime_memory'])
-
+                                             fexec.config['aws_lambda']['runtime_memory'])
 
     def enqueue_job(self, job: Job):
         """
@@ -1475,7 +1491,6 @@ class Orchestrator:
                 self.resource_provisioner.decrement_count(job.num_task_managers)
             time.sleep(1)
 
-
     def run_job(self, job):
         '''
         Runs one job. If there are available resources, it will start a Job Manager to process the job.
@@ -1502,9 +1517,9 @@ class Orchestrator:
         :return: future. The future of the Job Manager
         '''
         job.ec2_metadata = self.ec_2_metadata
-        job_manager = JobManager(fexec_args=self.fexec_args,job=job,resource_provisioner= self.resource_provisioner,
-                                 split_enumerator_thread_pool_size= self.split_enumerator_thread_pool_size,
-                                 split_enumerator_port= self.next_available_port)
+        job_manager = JobManager(fexec_args=self.fexec_args, job=job, resource_provisioner=self.resource_provisioner,
+                                 split_enumerator_thread_pool_size=self.split_enumerator_thread_pool_size,
+                                 split_enumerator_port=self.next_available_port)
 
         future = self.job_pool_executor.submit(job_manager.run)
         self.update_port()
