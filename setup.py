@@ -19,7 +19,8 @@ setup(
         'pillow==10.2.0',
         'numpy==1.26.4',
         'pyyaml==6.0.1',
-        'protobuf==4.24.0'
+        'protobuf==4.24.0',
+        'lithops-inference @ git+https://github.com/ZikBurns/lithops-inference'
     ],
     dependency_links = [
         'https://download.pytorch.org/whl/cpu/torch-2.1.1%2Bcpu-cp36-cp36m-linux_x86_64.whl',
