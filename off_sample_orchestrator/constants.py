@@ -61,3 +61,5 @@ LOGGING_FORMAT = "%(asctime)s [%(threadName)s] [%(levelname)s] [%(filename)s:%(l
 EXCEPTION_PERCENTAGE = 0
 DELAY_PERCENTAGE = 0
 DELAY_MAX = 0
+
+LOCAL_MODEL_PATH = "model.pt"
