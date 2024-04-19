@@ -9,7 +9,7 @@ setup(
     packages = find_packages(),
     install_requires=[
         'urllib3==1.26.18',
-        'grpcio==1.58.0',
+        'grpcio==1.56.0',
         'flask==3.0.2',
         'requests==2.31.0',
         'setuptools==68.2.2',
@@ -18,7 +18,8 @@ setup(
         'pillow==10.2.0',
         'numpy==1.26.4',
         'pyyaml==6.0.1',
-        'protobuf==4.24.0',
+        'protobuf==4.23.0',
+        'google-api-core==2.15.0'
         'lithops-inference @ git+https://github.com/ZikBurns/lithops-inference'
     ],
     dependency_links = [
