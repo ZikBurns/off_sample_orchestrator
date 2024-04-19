@@ -53,7 +53,7 @@ SPECULATION_INTERVAL_MS = 500
 SPECULATION_ADD_TASK_MANAGER = True
 MAX_SPLIT_RETRIES = 1
 
-KEEP_ALIVE = True
+KEEP_ALIVE = False
 KEEP_ALIVE_INTERVAL = 1
 
 LOGGING_FORMAT = "%(asctime)s [%(threadName)s] [%(levelname)s] [%(filename)s:%(lineno)d] [%(funcName)s] %(message)s"

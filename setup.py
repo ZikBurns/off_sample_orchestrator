@@ -10,7 +10,6 @@ setup(
     install_requires=[
         'urllib3==1.26.18',
         'grpcio==1.58.0',
-        'grpcio-tools==1.58.0',
         'flask==3.0.2',
         'requests==2.31.0',
         'setuptools==68.2.2',
