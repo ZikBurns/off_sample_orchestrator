@@ -10,7 +10,7 @@ MIN_PORT = 49152
 MAX_PORT = 65535
 
 # Max number of threads to use for the split enumerator
-SPLIT_ENUMERATOR_THREAD_POOL_SIZE = 10
+SPLIT_ENUMERATOR_THREAD_POOL_SIZE = 1000
 
 # Max number of concurrent Job Managers being used
 MAX_JOB_MANAGERS = 1
