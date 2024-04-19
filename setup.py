@@ -19,7 +19,7 @@ setup(
         'numpy==1.26.4',
         'pyyaml==6.0.1',
         'protobuf==4.23.0',
-        'google-api-core==2.15.0'
+        'google-api-core==2.15.0',
         'lithops-inference @ git+https://github.com/ZikBurns/lithops-inference'
     ],
     dependency_links = [
