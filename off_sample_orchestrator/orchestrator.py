@@ -889,8 +889,8 @@ class SplitEnumerator(SPLITRPCServicer):
             logger.info(f"Ending task manager {request.tid}")
             if self.speculator:
                 self.speculator.tid_check_dict.remove(request.tid)
-            tids = self.speculator.tid_check_dict.to_list()
-            logger.debug(f"Running Task Managers: {tids}")
+                tids = self.speculator.tid_check_dict.to_list()
+                logger.debug(f"Running Task Managers: {tids}")
             return splitResponse(inputs=[], sid=None)
 
 
