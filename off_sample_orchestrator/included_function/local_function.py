@@ -19,7 +19,7 @@ start = time.time()
 cwd = os.getcwd()
 import os
 current_dir = os.path.dirname(os.path.realpath(__file__))
-jit_model = torch.jit.load(f"{current_dir}/commons/torchscript_model_2.0.1.pt", torch.device('cpu'))
+jit_model = torch.jit.load('/tmp/off_sample_orchestrator/model.pt', torch.device('cpu'))
 resources = PredictResource()
 
 config_dict = {
