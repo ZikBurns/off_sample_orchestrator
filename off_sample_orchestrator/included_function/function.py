@@ -141,23 +141,26 @@ def default_function(payload):
             all_results = {}
             while batch:
                 response = request_split(stub, finished_urls, tid, sid)
-                batch = response.inputs
-                sid = response.sid
-                if 'to_delay' in payload:
-                    if payload['to_delay'] > 0:
-                        print(f"Delaying for {payload['to_delay']} seconds")
-                        time.sleep(payload['to_delay'])
-                if 'to_raise_exception' in payload:
-                    if payload['to_raise_exception']:
-                        print("Raising exception")
-                        raise Exception("Test exception")
-                if batch:
-                    prediction_dicts, time_log = process_batches(batch, config_dict)
-                    time_logs.append(time_log)
-                    for key, result in prediction_dicts.items():
-                        rpc_dict = split_grpc_pb2.Dict(key=key, value=str(result))
-                        all_results.update({key: str(result)})
-                        finished_urls.append(rpc_dict)
+                if response:
+                    batch = response.inputs
+                    sid = response.sid
+                    if 'to_delay' in payload:
+                        if payload['to_delay'] > 0:
+                            print(f"Delaying for {payload['to_delay']} seconds")
+                            time.sleep(payload['to_delay'])
+                    if 'to_raise_exception' in payload:
+                        if payload['to_raise_exception']:
+                            print("Raising exception")
+                            raise Exception("Test exception")
+                    if batch:
+                        prediction_dicts, time_log = process_batches(batch, config_dict)
+                        time_logs.append(time_log)
+                        for key, result in prediction_dicts.items():
+                            rpc_dict = split_grpc_pb2.Dict(key=key, value=str(result))
+                            all_results.update({key: str(result)})
+                            finished_urls.append(rpc_dict)
+                else:
+                    batch = None
             result = {'predictions': None}
         return {
             'statusCode': 200,
