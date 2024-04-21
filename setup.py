@@ -14,7 +14,7 @@ setup(
         'pyyaml',
         'grpcio==1.51.1',
         'protobuf==4.21.12',
-        'lithops @ git+https://github.com/ZikBurns/lithops-inference'
+        'lithops_serve @ git+https://github.com/ZikBurns/lithops-serve'
     ],
     dependency_links = [
         'https://download.pytorch.org/whl/cpu/torch-2.1.1%2Bcpu-cp36-cp36m-linux_x86_64.whl',

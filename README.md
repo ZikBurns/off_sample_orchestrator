@@ -27,8 +27,7 @@ conda create -n python311 python=3.11
 Install dependencies:
 
 ```bash
-pip install git+https://github.com/ZikBurns/lithops-inference
-pip install -r requirements.txt
+pip install git+https://github.com/ZikBurns/lithops-serve
 pip install torch==2.1.1 torchvision==0.16.1  --index-url https://download.pytorch.org/whl/cpu
 
 ```

@@ -14,7 +14,7 @@ from queue import Queue
 from .included_function.grpc_assets.split_grpc_pb2 import splitResponse
 from .included_function.grpc_assets.split_grpc_pb2_grpc import SPLITRPCServicer, add_SPLITRPCServicer_to_server
 import grpc
-from lithops import FunctionExecutor
+from lithops_serve import FunctionExecutor
 from .constants import MIN_PORT, MAX_PORT, MAX_JOB_MANAGERS, MAX_TASK_MANAGERS, \
     DEFAULT_IP, LOCAL_FUNCTION, DYNAMIC_SPLIT, SPLIT_ENUMERATOR_THREAD_POOL_SIZE, DEFAULT_ORCHESTRATOR, \
     ORCHESTRATOR_BACKENDS, EC2_HOST_MACHINE, OUTPUT_STORAGE, DEFAULT_TASK_MANAGER_CONFIG, EC2_METADATA_SERVICE, \
@@ -65,10 +65,14 @@ class Job:
                  speculation_multiplier: int = SPECULATION_MULTIPLIER,
                  speculation_quartile: float = SPECULATION_QUARTILE,
                  speculation_interval_ms: int = SPECULATION_INTERVAL_MS,
+                 speculation_add_task_manager: bool = SPECULATION_ADD_TASK_MANAGER,
                  max_split_retries: int = MAX_SPLIT_RETRIES,
                  exception_percentage: int = EXCEPTION_PERCENTAGE,
                  delay_percentage: int = DELAY_PERCENTAGE,
                  delay_max: int = DELAY_MAX,
+                 keep_alive: bool = KEEP_ALIVE,
+                 keep_alive_interval: int = KEEP_ALIVE_INTERVAL,
+                 local_model_path: str = LOCAL_MODEL_PATH
                  ):
         self.input = input
         if not job_name:
@@ -112,6 +116,7 @@ class Job:
         self.speculation_multiplier = speculation_multiplier
         self.speculation_quartile = speculation_quartile
         self.speculation_interval = speculation_interval_ms / 1000
+        self.speculation_add_task_manager = speculation_add_task_manager
         self.split_info = None
         self.max_split_retries = max_split_retries
         self.exception_percentage = exception_percentage
@@ -119,6 +124,9 @@ class Job:
         self.delay_max = delay_max
         self.extra_task_managers = 0
         self.extra_invoke_output = None
+        self.local_model_path = local_model_path
+        self.keep_alive = keep_alive
+        self.keep_alive_interval = keep_alive_interval
 
     def to_dict(self):
         '''
@@ -720,7 +728,7 @@ class Speculator():
                             split_copy = self.job_manager.split_controller.create_copy(sid)
                             if split_copy:
                                 self.job_manager.split_controller.put_split_pending(split_copy)
-                                if SPECULATION_ADD_TASK_MANAGER and split_copy.retries_count <= 1:
+                                if self.job.speculation_add_task_manager and split_copy.retries_count <= 1:
                                     self.job_manager.add_extra_task_executors(1)
                             else:
                                 logger.debug(f"Split reached maximum retries.")
@@ -1087,8 +1095,8 @@ class JobManager:
                     'tid': str(tids[i] + 1),
                     'ip': self.job.ip,
                     'port': self.split_enumerator_port,
-                    'keep_alive': KEEP_ALIVE,
-                    'keep_alive_interval': KEEP_ALIVE_INTERVAL,
+                    'keep_alive': self.job.keep_alive,
+                    'keep_alive_interval': self.job.keep_alive_interval,
                     'config': self.job.task_manager_config,
                     'to_raise_exception': random_list[i],
                     'to_delay': delay_list[i]
@@ -1238,9 +1246,9 @@ class JobManager:
                 self.job.bucket = self.fexec.config['aws_s3']['storage_bucket']
         else:
             os.makedirs('/tmp/off_sample_orchestrator/', exist_ok=True)
-            # split directory from file in LOCAL_MODEL_PATH
-            directory, filename = os.path.split(LOCAL_MODEL_PATH)
-            shutil.copyfile(LOCAL_MODEL_PATH, f'/tmp/off_sample_orchestrator/{filename}')
+            # split directory from file in local_model_path
+            directory, filename = os.path.split(self.job.local_model_path)
+            shutil.copyfile(self.job.local_model_path, f'/tmp/off_sample_orchestrator/{filename}')
 
         payload = self.build_payload()
         self.job.orchestrator_stats["started"] = time.time()
