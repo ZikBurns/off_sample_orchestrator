@@ -1,5 +1,6 @@
 import json
 import random
+import socket
 import subprocess
 import logging
 import time
@@ -1472,9 +1473,17 @@ class Orchestrator:
         """
         Updates the next_available_port to the next port in the range.
         """
-        self.next_available_port += 1
-        if self.next_available_port == self.max_port:
-            self.next_available_port = self.min_port
+        while True:
+            # Assign random port in the range
+            port = random.randint(self.min_port, self.max_port)
+            # Check if the port is available
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                try:
+                    sock.bind(("localhost", port))
+                    self.next_available_port = port
+                    return port
+                except OSError:
+                    continue
 
     def run_orchestrator(self):
         '''
