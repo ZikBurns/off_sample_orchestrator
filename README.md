@@ -5,6 +5,10 @@ python -m pip install --upgrade build
 python -m build
 pip install dist/off_sample_orchestrator-*.whl
 ```
+Or
+```bash
+pip install git+https://github.com/ZikBurns/lithops-inference
+```
 
 # CloudSkin-EMBL-Orchestrator
 

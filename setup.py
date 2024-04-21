@@ -8,17 +8,12 @@ setup(
     author_email='josep.calero@urv.cat',
     packages = find_packages(),
     install_requires=[
-        'urllib3',
         'flask',
-        'requests',
-        'setuptools',
-        'boto3',
-        'botocore',
         'pillow',
         'numpy',
         'pyyaml',
-        'grpcio',
-        'protobuf',
+        'grpcio==1.51.1',
+        'protobuf==4.21.12',
         'lithops-inference @ git+https://github.com/ZikBurns/lithops-inference'
     ],
     dependency_links = [
