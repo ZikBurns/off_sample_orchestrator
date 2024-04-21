@@ -7,7 +7,7 @@ pip install dist/off_sample_orchestrator-*.whl
 ```
 Or
 ```bash
-pip install git+https://github.com/ZikBurns/lithops-inference
+pip install git+https://github.com/ZikBurns/off_sample_orchestrator
 ```
 
 # CloudSkin-EMBL-Orchestrator
@@ -29,7 +29,7 @@ Install dependencies:
 ```bash
 pip install git+https://github.com/ZikBurns/lithops-inference
 pip install -r requirements.txt
-pip install torch==2.1.1 torchvision==0.16.1 torchaudio==2.1.1 --index-url https://download.pytorch.org/whl/cpu
+pip install torch==2.1.1 torchvision==0.16.1  --index-url https://download.pytorch.org/whl/cpu
 
 ```
 
