@@ -289,7 +289,7 @@ class ResourceProvisioner():
         num_task_managers = len(payloads)
         logger.info(f"Calling {num_task_managers} task managers locally")
         thread_pool = ThreadPoolExecutor(max_workers=1000)
-        print(f"Thread pool created with {SPLIT_ENUMERATOR_THREAD_POOL_SIZE} workers.")
+        logger.debug(f"Thread pool created with {SPLIT_ENUMERATOR_THREAD_POOL_SIZE} workers.")
         futures = [thread_pool.submit(self.local_invoke, payload) for payload in payloads]
         return futures
 
@@ -856,11 +856,14 @@ class SplitEnumerator(SPLITRPCServicer):
         :param context: grpc context. The context of the request
         :return: urlResponse. The response of the request
         '''
+        if self.speculator:
+            self.speculator.tid_check_dict.update(request.tid, time.time())
         keep_alive = request.keep_alive
         if keep_alive:
-            self.speculator.tid_check_dict.update(request.tid, time.time())
             logger.debug(f"Keep alive from TID {request.tid}")
             return splitResponse(inputs=[], sid=None)
+
+
 
         # If the request carries a finished split
         sids = self.job_manager.split_controller.running_splits.to_list()
