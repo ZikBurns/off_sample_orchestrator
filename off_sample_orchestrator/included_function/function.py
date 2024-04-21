@@ -10,7 +10,7 @@ import grpc
 from .grpc_assets import split_grpc_pb2
 from .grpc_assets import split_grpc_pb2_grpc
 
-CONNECTION_RETRIES = 5
+CONNECTION_RETRIES = 10
 
 start = time.time()
 jit_model = torch.jit.load("/function/bin/model.pt", torch.device('cpu'))

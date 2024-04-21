@@ -46,15 +46,15 @@ DEFAULT_TASK_MANAGER_CONFIG = {
     'predict': {'batch_size': 32, 'interop': 4, 'intraop': 2, 'n_models': 4}
 }
 
-SPECULATIVE_EXECUTION = False
+SPECULATIVE_EXECUTION = True
 SPECULATION_MULTIPLIER = 2
 SPECULATION_QUARTILE = 0.75
 SPECULATION_INTERVAL_MS = 500
 SPECULATION_ADD_TASK_MANAGER = True
 MAX_SPLIT_RETRIES = 1
 
-KEEP_ALIVE = False
-KEEP_ALIVE_INTERVAL = 1
+KEEP_ALIVE = True
+KEEP_ALIVE_INTERVAL = 2
 
 LOGGING_FORMAT = "%(asctime)s [%(threadName)s] [%(levelname)s] [%(filename)s:%(lineno)d] [%(funcName)s] %(message)s"
 
