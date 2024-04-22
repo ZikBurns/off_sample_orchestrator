@@ -15,8 +15,8 @@ setup(
         'grpcio==1.51.1',
         'protobuf==4.21.12',
         'lithops_serve @ git+https://github.com/ZikBurns/lithops-serve',
-        'torch==2.0.1+cpu',
-        'torchvision==0.15.2+cpu'
+        'torch==2.0.1',
+        'torchvision==0.15.2'
 
     ],
     dependency_links = ['https://download.pytorch.org/whl/cpu']
