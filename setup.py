@@ -16,9 +16,11 @@ setup(
         'protobuf==4.21.12',
         'lithops_serve @ git+https://github.com/ZikBurns/lithops-serve'
     ],
-    dependency_links = [
-        'https://download.pytorch.org/whl/cpu/torch-2.1.1%2Bcpu-cp36-cp36m-linux_x86_64.whl',
-        'https://download.pytorch.org/whl/cpu/torchvision-0.16.1-cp36-cp36m-linux_x86_64.whl'
-    ]
+extras_require={
+        ':python_version=="3.11"': [
+            'https://download.pytorch.org/whl/cpu/torch-2.0.1%2Bcpu-cp311-cp311-linux_x86_64.whl',
+            'https://download.pytorch.org/whl/cpu/torchvision-0.15.2%2Bcpu-cp311-cp311-linux_x86_64.whl'
+        ],
+    },
 )
 

@@ -1,11 +1,23 @@
+# Considerations
+This repo has been tested on Python 3.11. Conda is recommended.
+```bash
+mkdir -p ~/miniconda3
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda3/miniconda.sh
+bash ~/miniconda3/miniconda.sh -b -u -p ~/miniconda3
+rm -rf ~/miniconda3/miniconda.sh
+
+~/miniconda3/bin/conda init bash
+conda create -n python311 python=3.11
+```
+
 # Building the package
-Python 3.11 is required. Conda is recommended:
+
 ```bash
 python -m pip install --upgrade build
 python -m build
 pip install dist/off_sample_orchestrator-*.whl
 ```
-Or
+Or install directly from the latest version in the repository:
 ```bash
 pip install git+https://github.com/ZikBurns/off_sample_orchestrator
 ```

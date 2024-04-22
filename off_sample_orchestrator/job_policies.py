@@ -1,24 +1,24 @@
+from off_sample_orchestrator.orchestrator import Job
 
-
-def default_job_policy(job):
+def default_job_policy(job: Job) -> Job:
     split_size = job.split_size
     num_inputs = len(job.input)
     num_task_managers = int(num_inputs / split_size)
     job.num_task_managers = int(num_task_managers) if num_task_managers == int(num_task_managers) else int(num_task_managers) + 1
     return job
 
-def no_policy(job):
+def no_policy(job: Job) -> Job:
     return job
 
 
-def job_policy_1(job):
+def job_policy_1(job: Job) -> Job:
     num_task_managers = job.num_task_managers
     num_inputs = len(job.input)
     split_size = num_inputs / num_task_managers
     job.split_size = int(split_size) if split_size == int(split_size) else int(split_size) + 1
     return job
 
-def job_policy_2(job):
+def job_policy_2(job: Job) -> Job:
     if len(job.input)  <  job.split_size:
         job.split_size = len(job.input)
 
@@ -31,7 +31,7 @@ def job_policy_2(job):
     return job
 
 
-def job_policy_3(job):
+def job_policy_3(job: Job) -> Job:
     '''
     '''
 
@@ -86,6 +86,3 @@ def job_policy_3(job):
         job.num_task_managers = configs["num_task_managers"]
 
     return job
-
-def job_policy_4(job):
-    pass
