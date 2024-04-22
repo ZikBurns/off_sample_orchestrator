@@ -1483,7 +1483,8 @@ class Orchestrator:
                     sock.bind(("localhost", port))
                     self.next_available_port = port
                     return port
-                except OSError:
+                except Exception as e:
+                    logger.info(f"Port {port} is not available. Trying another port.")
                     continue
 
     def run_orchestrator(self):
