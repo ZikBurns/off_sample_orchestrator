@@ -15,7 +15,7 @@ from queue import Queue
 from .included_function.grpc_assets.split_grpc_pb2 import splitResponse
 from .included_function.grpc_assets.split_grpc_pb2_grpc import SPLITRPCServicer, add_SPLITRPCServicer_to_server
 import grpc
-from lithops_serve import FunctionExecutor
+from lithopserve import FunctionExecutor
 from .constants import MIN_PORT, MAX_PORT, MAX_JOB_MANAGERS, MAX_TASK_MANAGERS, \
     DEFAULT_IP, LOCAL_FUNCTION, DYNAMIC_SPLIT, SPLIT_ENUMERATOR_THREAD_POOL_SIZE, DEFAULT_ORCHESTRATOR, \
     ORCHESTRATOR_BACKENDS, EC2_HOST_MACHINE, OUTPUT_STORAGE, DEFAULT_TASK_MANAGER_CONFIG, EC2_METADATA_SERVICE, \
