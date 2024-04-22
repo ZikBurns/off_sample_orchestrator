@@ -1341,6 +1341,7 @@ class Orchestrator:
         self.min_port = min_port
         self.max_port = max_port
         self.next_available_port = min_port
+        self.update_port()
 
         # Check if the thread pool size is valid
         if split_enumerator_thread_pool_size < 1:
