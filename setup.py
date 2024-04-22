@@ -14,11 +14,11 @@ setup(
         'pyyaml',
         'grpcio==1.51.1',
         'protobuf==4.21.12',
-        'lithops_serve @ git+https://github.com/ZikBurns/lithops-serve'
+        'lithops_serve @ git+https://github.com/ZikBurns/lithops-serve',
+        'torch==2.0.1+cpu',
+        'torchvision==0.15.2+cpu'
+
     ],
-    dependency_links = [
-        'https://download.pytorch.org/whl/cpu/torch-2.0.1%2Bcpu-cp311-cp311-linux_x86_64.whl',
-        'https://download.pytorch.org/whl/cpu/torchvision-0.15.2%2Bcpu-cp311-cp311-linux_x86_64.whl'
-    ]
+    dependency_links = ['https://download.pytorch.org/whl/cpu']
 )
 
