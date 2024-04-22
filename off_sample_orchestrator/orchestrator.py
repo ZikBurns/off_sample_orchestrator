@@ -1252,7 +1252,7 @@ class JobManager:
             os.makedirs('/tmp/off_sample_orchestrator/', exist_ok=True)
             # split directory from file in local_model_path
             directory, filename = os.path.split(self.job.local_model_path)
-            shutil.copyfile(self.job.local_model_path, f'/tmp/off_sample_orchestrator/{filename}')
+            shutil.copyfile(self.job.local_model_path, f'/tmp/off_sample_orchestrator/{self.job.job_name}/{filename}')
 
         payload = self.build_payload()
         self.job.orchestrator_stats["started"] = time.time()
@@ -1271,7 +1271,7 @@ class JobManager:
         self.job.orchestrator_stats["finished"] = time.time()
         self.resource_provisioner.save_output(self.fexec, self.job)
         if self.job.orchestrator_backend == "local":
-            os.remove('/tmp/off_sample_orchestrator/model.pt')
+            os.remove(f'/tmp/off_sample_orchestrator/{self.job.job_name}/{filename}')
         return self.job.to_dict()
 
 
