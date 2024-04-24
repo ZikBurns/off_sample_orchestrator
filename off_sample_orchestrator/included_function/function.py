@@ -87,7 +87,7 @@ def process_batches(batch, config_dict):
 
 
 
-def default_function(payload):
+def default_function(id, payload, storage):
     global config_dict
     global manager
     tid = None
