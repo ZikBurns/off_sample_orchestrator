@@ -23,14 +23,15 @@ MAX_TASK_MANAGERS = 100
 # Supported backends
 LOCAL_BACKEND = "local"
 AWS_LAMBDA_BACKEND = "aws_lambda"
-ORCHESTRATOR_BACKENDS = {LOCAL_BACKEND, AWS_LAMBDA_BACKEND}
+K8S_BACKEND = "k8s"
+ORCHESTRATOR_BACKENDS = [LOCAL_BACKEND, AWS_LAMBDA_BACKEND, K8S_BACKEND]
 DEFAULT_ORCHESTRATOR = LOCAL_BACKEND
 
 # Default IP address for the orchestrator
 DEFAULT_IP = "0.0.0.0"
 
 # Supported output storage
-OUTPUT_STORAGE = {"local", "s3"}
+OUTPUT_STORAGE = {"local", "aws_s3", "minio"}
 
 # True if the orchestrator is running on an EC2 host machine.
 # It automatically deploys the function inside the same VPC, subnet and security group as the host machine

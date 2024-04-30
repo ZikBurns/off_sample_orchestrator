@@ -21,7 +21,8 @@ from .constants import MIN_PORT, MAX_PORT, MAX_JOB_MANAGERS, MAX_TASK_MANAGERS, 
     ORCHESTRATOR_BACKENDS, EC2_HOST_MACHINE, OUTPUT_STORAGE, DEFAULT_TASK_MANAGER_CONFIG, EC2_METADATA_SERVICE, \
     SPECULATIVE_EXECUTION, SPECULATION_MULTIPLIER, SPECULATION_QUARTILE, SPECULATION_INTERVAL_MS, MAX_SPLIT_RETRIES, \
     LOGGING_FORMAT, SPECULATION_ADD_TASK_MANAGER, DEFAULT_TASK_MANAGERS, DEFAULT_SPLIT_SIZE, AWS_LAMBDA_BACKEND, \
-    LOCAL_BACKEND, EXCEPTION_PERCENTAGE, DELAY_PERCENTAGE, DELAY_MAX, KEEP_ALIVE_INTERVAL, KEEP_ALIVE, LOCAL_MODEL_PATH
+    LOCAL_BACKEND, EXCEPTION_PERCENTAGE, DELAY_PERCENTAGE, DELAY_MAX, KEEP_ALIVE_INTERVAL, KEEP_ALIVE, \
+    LOCAL_MODEL_PATH, K8S_BACKEND
 from .job_policies import default_job_policy
 
 logger = logging.getLogger()
@@ -416,8 +417,8 @@ class ResourceProvisioner():
         :return: bool. True if the output was saved, False otherwise
         '''
         try:
-            if job.output_storage == "s3" and fexec:
-                logger.info(f"Saving output to s3 bucket {job.bucket} with key {job.output_location}.json")
+            if job.output_storage == "aws_s3" and fexec:
+                logger.info(f"Saving output to aws_s3 bucket {job.bucket} with key {job.output_location}.json")
                 json_string = json.dumps(job.to_dict())
                 fexec.storage.put_object(bucket=fexec.storage.bucket, key=f"{job.output_location}.json",
                                          body=json_string)
@@ -435,7 +436,10 @@ class ResourceProvisioner():
 
         logger.info(f"No Output storage was declared. Output not saved, but printed as json. ")
         # Print the json to the logger
-        logger.info(json.dumps(job.to_dict()))
+        try:
+            logger.info(json.dumps(job.to_dict()))
+        except:
+            logger.info(job.to_dict())
         return True
 
     def get_ec2_metadata(self):
@@ -1143,6 +1147,7 @@ class JobManager:
             if self.job.orchestrator_backend != "local":
                 payload['body']['bucket'] = self.job.bucket
             payload_list.append(payload)
+        print(payload_list)
         return payload_list
 
     def build_payload(self):
@@ -1247,7 +1252,8 @@ class JobManager:
         if self.job.orchestrator_backend != "local":
             self.fexec = FunctionExecutor(**self.fexec_args)
             if not self.job.bucket:
-                self.job.bucket = self.fexec.config['aws_s3']['storage_bucket']
+                storage_backend = self.fexec.config['lithopserve']['storage']
+                self.job.bucket = self.fexec.config[storage_backend]['storage_bucket']
         else:
             os.makedirs('/tmp/off_sample_orchestrator/', exist_ok=True)
             # split directory from file in local_model_path
@@ -1292,8 +1298,7 @@ class Orchestrator:
     """
     The Orchestrator is used to coordinate the Job Managers. It will enqueue the jobs and start the Job Managers.
     Important Parameters:
-    :param fexec_args: dict. The arguments to be used in the FunctionExecutor7
-    :param orchestrator_backends: list. The orchestrator backends to be used and initialized
+    :param fexec_args_dict: dict. The arguments to be used in the FunctionExecutor7
     :param initialize: bool. If the orchestrator should be initialized
     :param job_policy: JobPolicy. The job policy to be used
     :param ec2_host_machine: bool. If the host machine is an EC2 instance
@@ -1307,10 +1312,8 @@ class Orchestrator:
     :param logging_level: int. The logging level
     :param job_pool_executor: Executor. The executor to be used in the job pool
     """
-
     def __init__(self,
-                 fexec_args: dict = None,
-                 orchestrator_backends: list = ORCHESTRATOR_BACKENDS,
+                 fexec_args_dict: dict = None,
                  initialize=True,
                  job_policy=default_job_policy,
                  ec2_host_machine: bool = EC2_HOST_MACHINE,
@@ -1330,10 +1333,9 @@ class Orchestrator:
         )
 
         # check if orchestrator_backend is valid
-        if all(backend not in ORCHESTRATOR_BACKENDS for backend in orchestrator_backends):
+        if all(backend not in ORCHESTRATOR_BACKENDS for backend in fexec_args_dict.keys()):
             raise ValueError(
-                f"Invalid orchestrator_backend: {orchestrator_backends}. Must be of {ORCHESTRATOR_BACKENDS}")
-        self.orchestrator_backends = orchestrator_backends
+                f"Invalid orchestrator_backend: {fexec_args_dict.keys()}. Must be of {ORCHESTRATOR_BACKENDS}")
 
         # Check if the port range is valid
         if min_port > max_port or max_port > 65535 or min_port > 65535 or min_port < 0 or max_port < 0:
@@ -1359,35 +1361,39 @@ class Orchestrator:
 
         # Initialize the ResourceProvisioner
         self.resource_provisioner = ResourceProvisioner(job_policy, max_job_managers, max_task_managers)
-
-        self.fexec_args = fexec_args
-        if AWS_LAMBDA_BACKEND in orchestrator_backends:
+        self.ec_2_metadata = None
+        self.fexec_args_dict = fexec_args_dict
+        if AWS_LAMBDA_BACKEND in fexec_args_dict:
             if ec2_host_machine:
                 self.ec_2_metadata = self.resource_provisioner.get_ec2_metadata()
 
                 logger.info(f"EC2 metadata: {self.ec_2_metadata}")
-                self.fexec_args['vpc'] = {'subnets': [self.ec_2_metadata['subnet_id']],
+                self.fexec_args_dict[AWS_LAMBDA_BACKEND]['vpc'] = {'subnets': [self.ec_2_metadata['subnet_id']],
                                           'security_groups': [self.ec_2_metadata['security_group_id']]}
-            else:
-                self.ec_2_metadata = None
 
         self.job_queue = Queue()
         self.stop_server_flag = threading.Event()
-
         self.keep_running = True
         self.job_pool_executor = job_pool_executor
 
         self.learning_plane = LearningPlane()
-        if initialize and AWS_LAMBDA_BACKEND in orchestrator_backends:
-            if self.check_runtime_status(fexec=None, double_check=True):
+        print("Deploying Lambda")
+        if initialize and AWS_LAMBDA_BACKEND in fexec_args_dict:
+            if self.check_runtime_status(runtime_backend=AWS_LAMBDA_BACKEND, double_check=True):
                 logger.info(f"Runtime is available")
             else:
                 logger.info(f"Runtime is not available")
-                self.redeploy_runtime(fexec=None)
+                self.redeploy_runtime(runtime_backend=AWS_LAMBDA_BACKEND)
+
+        print("Deploying K8s")
+        if initialize and K8S_BACKEND in fexec_args_dict:
+            fexec = FunctionExecutor(**self.fexec_args_dict[K8S_BACKEND])
+            runtime_name = fexec.config[K8S_BACKEND]['runtime']
+            fexec.compute_handler.build_runtime(runtime_name, 'Dockerfile')
 
         logger.info(f"Orchestrator initialized")
 
-    def check_runtime_status(self, fexec: FunctionExecutor = None, double_check: bool = True):
+    def check_runtime_status(self, fexec: FunctionExecutor = None, double_check: bool = True, runtime_backend: str = AWS_LAMBDA_BACKEND):
         '''
         Checks if the runtime is available. If double_check is True, it will test the runtime by calling a function.
         :param fexec: FunctionExecutor. The FunctionExecutor to be used
@@ -1396,9 +1402,9 @@ class Orchestrator:
         '''
         logger.info(f"Checking Lithops backend configuration...")
         if not fexec:
-            fexec = FunctionExecutor(**self.fexec_args)
+            fexec = FunctionExecutor(**self.fexec_args_dict[runtime_backend])
         runtime_meta = fexec.invoker.get_runtime_meta(fexec._create_job_id('A'),
-                                                      fexec.config['aws_lambda']['runtime_memory'])
+                                                      fexec.config[runtime_backend]['runtime_memory'])
         if runtime_meta:
             if double_check:
                 logger.info(f"Runtime {fexec.backend} found.")
@@ -1416,14 +1422,14 @@ class Orchestrator:
             logger.info(f"Runtime {fexec.backend} not found.")
             return False
 
-    def redeploy_runtime(self, fexec: FunctionExecutor = None, initialize: bool = True):
+    def redeploy_runtime(self, fexec: FunctionExecutor = None, initialize: bool = True, runtime_backend: str = AWS_LAMBDA_BACKEND):
         '''
         Redeploys the runtime by deleting it, creating it again and testing it.
         '''
         if not fexec:
-            fexec = FunctionExecutor(**self.fexec_args)
-        fexec.compute_handler.delete_runtime(fexec.config['aws_lambda']['runtime'],
-                                             fexec.config['aws_lambda']['runtime_memory'])
+            fexec = FunctionExecutor(**self.fexec_args_dict[runtime_backend])
+        fexec.compute_handler.delete_runtime(fexec.config[runtime_backend]['runtime'],
+                                             fexec.config[runtime_backend]['runtime_memory'])
         exists_included_function = True
         if not os.path.isdir("included_function"):
             exists_included_function = False
@@ -1437,7 +1443,8 @@ class Orchestrator:
             shutil.copytree(f"{current_dir}/included_function", f"{cwd}/included_function")
         else:
             logger.info(f"Using included_function found in the current directory")
-        logger.info(f"Runtime {self.fexec_args['runtime']} not found. Creating runtime...")
+        logger.info(f"Runtime {self.fexec_args_dict[runtime_backend]['runtime']} not found. Creating runtime...")
+
         if initialize:
             lithops_futures = self.resource_provisioner.lithops_call(fexec, payloads=[{'body': {'do_nothing': True}}])
             lithops_results = self.resource_provisioner.lithops_wait_futures(fexec, futures=lithops_futures, timeout=30,
@@ -1447,13 +1454,13 @@ class Orchestrator:
             # Remove the included_function directory
             shutil.rmtree(f"{cwd}/included_function")
 
-    def delete_runtime(self):
+    def delete_runtime(self, runtime_backend: str = AWS_LAMBDA_BACKEND):
         '''
         Deletes the runtime.
         '''
-        fexec = FunctionExecutor(**self.fexec_args)
-        fexec.compute_handler.delete_runtime(fexec.config['aws_lambda']['runtime'],
-                                             fexec.config['aws_lambda']['runtime_memory'])
+        fexec = FunctionExecutor(**self.fexec_args_dict[runtime_backend])
+        fexec.compute_handler.delete_runtime(fexec.config[runtime_backend]['runtime'],
+                                             fexec.config[runtime_backend]['runtime_memory'])
 
     def enqueue_job(self, job: Job):
         """
@@ -1539,7 +1546,8 @@ class Orchestrator:
         :return: future. The future of the Job Manager
         '''
         job.ec2_metadata = self.ec_2_metadata
-        job_manager = JobManager(fexec_args=self.fexec_args, job=job, resource_provisioner=self.resource_provisioner,
+        backend = job.orchestrator_backend
+        job_manager = JobManager(fexec_args=self.fexec_args_dict[backend], job=job, resource_provisioner=self.resource_provisioner,
                                  split_enumerator_thread_pool_size=self.split_enumerator_thread_pool_size,
                                  split_enumerator_port=self.next_available_port)
 
@@ -1547,13 +1555,5 @@ class Orchestrator:
         self.update_port()
         return future
 
-    def force_cold_start(self, sleep_time=600):
-        '''
-        Forces a cold start by deleting the runtime and creating it again.
-        '''
-        fexec = FunctionExecutor(**self.fexec_args)
-        runtime_name = fexec.config['aws_lambda']['runtime']
-        runtime_memory = fexec.config['aws_lambda']['runtime_memory']
-        fexec.compute_handler.backend.force_cold(runtime_name, runtime_memory)
-        time.sleep(sleep_time)
+
 
