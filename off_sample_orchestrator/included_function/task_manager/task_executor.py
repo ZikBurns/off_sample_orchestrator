@@ -88,7 +88,8 @@ class TaskExecutor:
             for key, value in image_dict.items():
                 try:
                     self.valid_type_check(value)
-                    if isinstance(value, np.ndarray):
+                    # If the input queue is a pipe and the value is a numpy, convert it to tensor.
+                    if isinstance(self.input_queue, OutputPipeQueue) and isinstance(value, np.ndarray):
                         tensor = torch.from_numpy(value)
                         image_dict.update({key: tensor})
                 except Exception as e:
@@ -149,22 +150,14 @@ class TaskExecutor:
 
                 for key, value in results.items():
                     if not self.ens:
-                        if torch.is_tensor(value):
+                        # If the output queue is a pipe and the value is a tensor, convert it to numpy.
+                        # Tensors are not serializable in pipes.
+                        if isinstance(self.input_queue, InputPipeQueue) and torch.is_tensor(value):
                             value = value.numpy()
-                        # print(f"{self.function.__name__} - Putting {key} in output queue")
                         self.output_queue.put({key: value}, process_id)
                     if self.time_log_file:
                         with open(self.time_log_file, 'a') as f:
                             f.write(f"{key},{self.function.__name__},finished,{time.time()}\n")
-
-                if self.ens:
-                    return results
-
-                if last:
-                    self.input_queue.put(None)
-                    self.update_queue_counter()
-                    return
-
             except Exception as e:
                 logger.error(f"Error executing task {self.function.__name__}. {e}")
                 print(f"Error executing task {self.function.__name__}. {e}")
@@ -172,4 +165,12 @@ class TaskExecutor:
                 for key, value in dequeued_dicts.items():
                     logger.error(f"{key}")
                     self.output_queue.put({key: e}, process_id)
+                results = dequeued_dicts
 
+            if self.ens:
+                return results
+
+            if last:
+                self.input_queue.put(None)
+                self.update_queue_counter()
+                return
