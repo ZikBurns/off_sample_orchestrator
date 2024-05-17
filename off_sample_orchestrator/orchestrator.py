@@ -161,6 +161,15 @@ class Job:
             "extra_invoke_output": self.extra_invoke_output
         }
 
+    def to_json(self):
+        return json.dumps(self.__dict__)
+
+    @classmethod
+    def from_json(cls, json_str):
+        data = json.loads(json_str)
+        return cls(**data)
+
+
 
 class ResourceProvisioner():
     '''
