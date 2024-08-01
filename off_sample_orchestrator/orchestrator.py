@@ -73,7 +73,8 @@ class Job:
                  delay_max: int = DELAY_MAX,
                  keep_alive: bool = KEEP_ALIVE,
                  keep_alive_interval: int = KEEP_ALIVE_INTERVAL,
-                 local_model_path: str = LOCAL_MODEL_PATH
+                 local_model_path: str = LOCAL_MODEL_PATH,
+                 get_cloudwatch_report=True
                  ):
         self.input = input
         if not job_name:
@@ -128,6 +129,7 @@ class Job:
         self.local_model_path = local_model_path
         self.keep_alive = keep_alive
         self.keep_alive_interval = keep_alive_interval
+        self.get_cloudwatch_report = get_cloudwatch_report
 
     def to_dict(self):
         '''
@@ -168,7 +170,6 @@ class Job:
     def from_json(cls, json_str):
         data = json.loads(json_str)
         return cls(**data)
-
 
 
 class ResourceProvisioner():
@@ -345,6 +346,39 @@ class ResourceProvisioner():
                 f"Depending on the error, you may need to redeploy the runtime. Use the redeploy_runtime method of the orchestrator.")
             return e
 
+    def get_cloudwatch_report(self, fexec: FunctionExecutor, job):
+        session = fexec.compute_handler.backend.aws_session
+        logs_client = session.client('logs', region_name='eu-west-1')
+        invoke_stats = job.output['lithops_stats']
+        if invoke_stats:
+            runtime_name = fexec.compute_handler.config['aws_lambda']['runtime']
+            runtime_memory = fexec.compute_handler.config['aws_lambda']['runtime_memory']
+            function_name = fexec.compute_handler.backend._format_function_name(runtime_name=runtime_name,
+                                                                                runtime_memory=runtime_memory)
+            log_group_name = f'/aws/lambda/{function_name}'
+
+            for i, stat in enumerate(invoke_stats):
+                activation_id = stat['activation_id']
+                start_time = stat['host_submit_tstamp']
+                end_time = stat['host_status_done_tstamp']
+                response = logs_client.filter_log_events(
+                    logGroupName=log_group_name,
+                    filterPattern=f"\"REPORT RequestId: {activation_id}\"",
+                    startTime=int(start_time * 1000),
+                    endTime=int(end_time * 1000),
+                )
+                for event in response['events']:
+                    message = event['message']
+                    print(f"Log Message: {message}")
+
+                    # Search for the billed duration in the log message
+                    if activation_id in message:
+                        # Add message to the invoke stats and update in job
+                        invoke_stats[i]['log_message'] = message
+                        break
+            job.output['lithops_stats'] = invoke_stats
+        return job
+
     def lithops_wait_futures(self, fexec: FunctionExecutor, futures: list, timeout: int = None,
                              exception_str: bool = True):
         '''
@@ -361,6 +395,7 @@ class ResourceProvisioner():
             logger.info(f"Finished {num_task_managers} task managers")
             try:
                 stats = fexec.stats(futures)
+
             except Exception as e:
                 stats = None
                 logger.error(f"Error getting stats: {e}")
@@ -873,8 +908,6 @@ class SplitEnumerator(SPLITRPCServicer):
             logger.debug(f"Keep alive from TID {request.tid}")
             return splitResponse(inputs=[], sid=None)
 
-
-
         # If the request carries a finished split
         sids = self.job_manager.split_controller.running_splits.to_list()
         logger.debug(f"Running splits when requested: {sids}")
@@ -1208,11 +1241,11 @@ class JobManager:
         and the split info.
         """
         self.close_server()
-        self.job.output = self.splits_outputs()
+        self.job.output = invoke_output
         self.job.split_times = self.splits_times()
         self.job.split_info = [self.split_controller.done_splits.get(sid).to_dict_reduced() for sid in
                                self.split_controller.done_splits.to_list()]
-        self.job.invoke_output = invoke_output
+        self.job.invoke_output = self.splits_outputs()
 
     def add_extra_task_executors(self, num_extra_task_managers):
         """
@@ -1278,6 +1311,8 @@ class JobManager:
             self.job.output = invoke_output
 
         self.job.orchestrator_stats["finished"] = time.time()
+        if self.job.get_cloudwatch_report:
+            self.job = self.resource_provisioner.get_cloudwatch_report(self.fexec, self.job)
         self.resource_provisioner.save_output(self.fexec, self.job)
         if self.job.orchestrator_backend == "local":
             os.remove(f'/tmp/off_sample_orchestrator/{filename}')
@@ -1565,4 +1600,5 @@ class Orchestrator:
         runtime_memory = fexec.config['aws_lambda']['runtime_memory']
         fexec.compute_handler.backend.force_cold(runtime_name, runtime_memory)
         time.sleep(sleep_time)
+
 
