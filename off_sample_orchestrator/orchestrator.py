@@ -358,26 +358,33 @@ class ResourceProvisioner():
             log_group_name = f'/aws/lambda/{function_name}'
 
             for i, stat in enumerate(invoke_stats):
-                activation_id = stat['activation_id']
-                start_time = stat['host_submit_tstamp']
-                end_time = stat['host_status_done_tstamp']
-                response = logs_client.filter_log_events(
-                    logGroupName=log_group_name,
-                    filterPattern=f"\"REPORT RequestId: {activation_id}\"",
-                    startTime=int(start_time * 1000),
-                    endTime=int(end_time * 1000),
-                )
-                for event in response['events']:
-                    message = event['message']
-                    print(f"Log Message: {message}")
+                count = 0
+                while 'log_message' not in invoke_stats[i] and count<30:
+                    activation_id = stat['activation_id']
+                    start_time = stat['host_submit_tstamp']
+                    end_time = stat['host_status_done_tstamp']
+                    response = logs_client.filter_log_events(
+                        logGroupName=log_group_name,
+                        filterPattern=f"\"REPORT RequestId: {activation_id}\"",
+                        startTime=int(start_time * 1000),
+                        endTime=int(end_time * 1000),
+                    )
+                    if response['events']:
+                        for event in response['events']:
+                            message = event['message']
+                            print(f"Log Message: {message}")
 
-                    # Search for the billed duration in the log message
-                    if activation_id in message:
-                        # Add message to the invoke stats and update in job
-                        invoke_stats[i]['log_message'] = message
-                        break
+                            # Search for the billed duration in the log message
+                            if activation_id in message:
+                                # Add message to the invoke stats and update in job
+                                invoke_stats[i]['log_message'] = message
+                                break
+                    else:
+                        time.sleep(1)
+                        count += 1
             job.output['lithops_stats'] = invoke_stats
         return job
+
 
     def lithops_wait_futures(self, fexec: FunctionExecutor, futures: list, timeout: int = None,
                              exception_str: bool = True):
