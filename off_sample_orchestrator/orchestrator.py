@@ -780,7 +780,7 @@ class Speculator():
                             split_copy = self.job_manager.split_controller.create_copy(sid)
                             if split_copy:
                                 self.job_manager.split_controller.put_split_pending(split_copy)
-                                if self.job.speculation_add_task_manager and split_copy.retries_count <= 1:
+                                if self.job_manager.job.speculation_add_task_manager and split_copy.retries_count <= 1:
                                     self.job_manager.add_extra_task_executors(1)
                             else:
                                 logger.debug(f"Split reached maximum retries.")
