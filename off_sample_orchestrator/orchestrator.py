@@ -347,42 +347,47 @@ class ResourceProvisioner():
             return e
 
     def get_cloudwatch_report(self, fexec: FunctionExecutor, job):
-        session = fexec.compute_handler.backend.aws_session
-        logs_client = session.client('logs', region_name='eu-west-1')
-        invoke_stats = job.output['lithops_stats']
-        if invoke_stats:
-            runtime_name = fexec.compute_handler.config['aws_lambda']['runtime']
-            runtime_memory = fexec.compute_handler.config['aws_lambda']['runtime_memory']
-            function_name = fexec.compute_handler.backend._format_function_name(runtime_name=runtime_name,
-                                                                                runtime_memory=runtime_memory)
-            log_group_name = f'/aws/lambda/{function_name}'
+        try:
+            session = fexec.compute_handler.backend.aws_session
+            logs_client = session.client('logs', region_name='eu-west-1')
+            invoke_stats = job.output['lithops_stats']
+            if invoke_stats:
+                runtime_name = fexec.compute_handler.config['aws_lambda']['runtime']
+                runtime_memory = fexec.compute_handler.config['aws_lambda']['runtime_memory']
+                function_name = fexec.compute_handler.backend._format_function_name(runtime_name=runtime_name,
+                                                                                    runtime_memory=runtime_memory)
+                log_group_name = f'/aws/lambda/{function_name}'
 
-            for i, stat in enumerate(invoke_stats):
-                count = 0
-                while 'log_message' not in invoke_stats[i] and count<30:
-                    activation_id = stat['activation_id']
-                    start_time = stat['host_submit_tstamp']
-                    end_time = stat['host_status_done_tstamp']
-                    response = logs_client.filter_log_events(
-                        logGroupName=log_group_name,
-                        filterPattern=f"\"REPORT RequestId: {activation_id}\"",
-                        startTime=int(start_time * 1000),
-                        endTime=int(end_time * 1000),
-                    )
-                    if response['events']:
-                        for event in response['events']:
-                            message = event['message']
-                            print(f"Log Message: {message}")
+                for i, stat in enumerate(invoke_stats):
+                    count = 0
+                    while 'log_message' not in invoke_stats[i] and count<30:
+                        activation_id = stat['activation_id']
+                        start_time = stat['host_submit_tstamp']
+                        end_time = stat['host_status_done_tstamp']
+                        response = logs_client.filter_log_events(
+                            logGroupName=log_group_name,
+                            filterPattern=f"\"REPORT RequestId: {activation_id}\"",
+                            startTime=int(start_time * 1000),
+                            endTime=int(end_time * 1000),
+                        )
+                        if response['events']:
+                            for event in response['events']:
+                                message = event['message']
+                                logger.info(f"Log Message: {message}")
 
-                            # Search for the billed duration in the log message
-                            if activation_id in message:
-                                # Add message to the invoke stats and update in job
-                                invoke_stats[i]['log_message'] = message
-                                break
-                    else:
-                        time.sleep(1)
-                        count += 1
-            job.output['lithops_stats'] = invoke_stats
+                                # Search for the billed duration in the log message
+                                if activation_id in message:
+                                    # Add message to the invoke stats and update in job
+                                    invoke_stats[i]['log_message'] = message
+                                    break
+                        else:
+                            time.sleep(1)
+                            count += 1
+                job.output['lithops_stats'] = invoke_stats
+        except Exception as e:
+            logger.error(f"Error getting cloudwatch report: {e}")
+            return None
+
         return job
 
 
@@ -1319,7 +1324,9 @@ class JobManager:
 
         self.job.orchestrator_stats["finished"] = time.time()
         if self.job.get_cloudwatch_report:
+            logger.info(f"Getting CloudWatch report.")
             self.job = self.resource_provisioner.get_cloudwatch_report(self.fexec, self.job)
+            logger.info(f"CloudWatch report received.")
         self.resource_provisioner.save_output(self.fexec, self.job)
         if self.job.orchestrator_backend == "local":
             os.remove(f'/tmp/off_sample_orchestrator/{filename}')
