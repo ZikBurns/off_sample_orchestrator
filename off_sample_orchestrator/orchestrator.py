@@ -381,7 +381,7 @@ class ResourceProvisioner():
                                     invoke_stats[i]['log_message'] = message
                                     break
                         else:
-                            time.sleep(1)
+                            time.sleep(5)
                             count += 1
                 job.output['lithops_stats'] = invoke_stats
         except Exception as e:
