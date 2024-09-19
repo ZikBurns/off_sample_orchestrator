@@ -1,6 +1,5 @@
 import os
 current_dir = os.path.dirname(os.path.realpath(__file__))
-LOCAL_FUNCTION = f"{current_dir}/included_function/local_function.py"
 
 # Dynamic split (True) or static split (False)
 DYNAMIC_SPLIT = True

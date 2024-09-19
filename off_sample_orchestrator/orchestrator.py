@@ -17,7 +17,7 @@ from .included_function.grpc_assets.split_grpc_pb2_grpc import SPLITRPCServicer,
 import grpc
 from lithopserve import FunctionExecutor
 from .constants import MIN_PORT, MAX_PORT, MAX_JOB_MANAGERS, MAX_TASK_MANAGERS, \
-    DEFAULT_IP, LOCAL_FUNCTION, DYNAMIC_SPLIT, SPLIT_ENUMERATOR_THREAD_POOL_SIZE, DEFAULT_ORCHESTRATOR, \
+    DEFAULT_IP, DYNAMIC_SPLIT, SPLIT_ENUMERATOR_THREAD_POOL_SIZE, DEFAULT_ORCHESTRATOR, \
     ORCHESTRATOR_BACKENDS, EC2_HOST_MACHINE, OUTPUT_STORAGE, DEFAULT_TASK_MANAGER_CONFIG, EC2_METADATA_SERVICE, \
     SPECULATIVE_EXECUTION, SPECULATION_MULTIPLIER, SPECULATION_QUARTILE, SPECULATION_INTERVAL_MS, MAX_SPLIT_RETRIES, \
     LOGGING_FORMAT, SPECULATION_ADD_TASK_MANAGER, DEFAULT_TASK_MANAGERS, DEFAULT_SPLIT_SIZE, AWS_LAMBDA_BACKEND, \
@@ -264,59 +264,31 @@ class ResourceProvisioner():
         job = self.job_policy(job)
         return job
 
-    def local_invoke(self, payload: dict):
-        '''
-        Calls the local function with the payload.
-        :param payload: dict. The payload to be sent to the local function
-        :return: dict. The result of the local function
-        '''
-        json_payload = json.dumps(payload)
-        escaped_json_payload = json_payload.replace('"', '\\"')
-        try:
-            logger.info(f"Calling local function with payload: {escaped_json_payload}")
-            process = subprocess.Popen(f'python {LOCAL_FUNCTION} "{escaped_json_payload}"', stdout=subprocess.PIPE,
-                                       shell=True)
-            output, error = process.communicate(timeout=None)
-            logger.debug("Local function finished.")
-        except Exception as e:
-            logger.error(f"Error calling local function: {e}")
-            return e
-        try:
-            local_result = output.decode('utf-8').replace("'", '"').replace('"{', '{"').replace('}"', '"}').replace(
-                '""', '"').replace("None", "null")
-            local_result = json.loads(local_result)
-            return local_result
-        except Exception as e:
-            logger.error(f"Error parsing local function output: {e}. Returning raw output.")
-            local_result = output.decode('utf-8')
-            return local_result
-
-    def local_call(self, payloads: list):
+    def local_call(self, fexec: FunctionExecutor, payloads: list):
         '''
         Calls a pool of local task managers with the payloads
         :param payloads: list. The payloads to be sent to the task managers
         :return: list. The results of the task managers
         '''
         num_task_managers = len(payloads)
-        logger.info(f"Calling {num_task_managers} task managers locally")
-        thread_pool = ThreadPoolExecutor(max_workers=1000)
-        logger.debug(f"Thread pool created with {SPLIT_ENUMERATOR_THREAD_POOL_SIZE} workers.")
-        futures = [thread_pool.submit(self.local_invoke, payload) for payload in payloads]
-        return futures
-
-    def local_wait_futures(self, futures: list):
-        '''
-        Waits for the futures of the local task managers.
-        :param futures: list. The futures of the task managers
-        '''
-        num_task_managers = len(futures)
-        concurrent.futures.wait(futures)
-        results = []
-        for future in futures:
-            result = future.result()
-            results.append(result)
-        logger.info(f"Retrieved results from {num_task_managers} local task managers")
-        return results
+        try:
+            payload_list = []
+            for payload in payloads:
+                payload_list.append({'payload': payload})
+            logger.info(f"Calling {num_task_managers} task managers.")
+            from .included_function.local_function import default_function
+            futures = fexec.map(map_function=default_function, map_iterdata=payload_list)
+            return futures
+        except Exception as e:
+            if exception_str:
+                try:
+                    e = str(e)
+                except Exception as e2:
+                    pass
+            logger.error(f"Error in lithops call: {e}")
+            logger.error(
+                f"Depending on the error, you may need to redeploy the runtime. Use the redeploy_runtime method of the orchestrator.")
+            return e
 
     def lithops_call(self, fexec: FunctionExecutor, payloads: list, exception_str: bool = True):
         '''
@@ -347,52 +319,46 @@ class ResourceProvisioner():
             return e
 
     def get_cloudwatch_report(self, fexec: FunctionExecutor, job):
-        try:
-            session = fexec.compute_handler.backend.aws_session
-            logs_client = session.client('logs', region_name='eu-west-1')
-            invoke_stats = job.output['lithops_stats']
-            if invoke_stats:
-                runtime_name = fexec.compute_handler.config['aws_lambda']['runtime']
-                runtime_memory = fexec.compute_handler.config['aws_lambda']['runtime_memory']
-                function_name = fexec.compute_handler.backend._format_function_name(runtime_name=runtime_name,
-                                                                                    runtime_memory=runtime_memory)
-                log_group_name = f'/aws/lambda/{function_name}'
+        session = fexec.compute_handler.backend.aws_session
+        logs_client = session.client('logs', region_name='eu-west-1')
+        invoke_stats = job.output['lithops_stats']
+        if invoke_stats:
+            runtime_name = fexec.compute_handler.config['aws_lambda']['runtime']
+            runtime_memory = fexec.compute_handler.config['aws_lambda']['runtime_memory']
+            function_name = fexec.compute_handler.backend._format_function_name(runtime_name=runtime_name,
+                                                                                runtime_memory=runtime_memory)
+            log_group_name = f'/aws/lambda/{function_name}'
 
-                for i, stat in enumerate(invoke_stats):
-                    count = 0
-                    while 'log_message' not in invoke_stats[i] and count<30:
-                        activation_id = stat['activation_id']
-                        start_time = stat['host_submit_tstamp']
-                        end_time = stat['host_status_done_tstamp']
-                        response = logs_client.filter_log_events(
-                            logGroupName=log_group_name,
-                            filterPattern=f"\"REPORT RequestId: {activation_id}\"",
-                            startTime=int(start_time * 1000),
-                            endTime=int(end_time * 1000),
-                        )
-                        if response['events']:
-                            for event in response['events']:
-                                message = event['message']
-                                logger.info(f"Log Message: {message}")
+            for i, stat in enumerate(invoke_stats):
+                count = 0
+                while 'log_message' not in invoke_stats[i] and count < 30:
+                    activation_id = stat['activation_id']
+                    start_time = stat['host_submit_tstamp']
+                    end_time = stat['host_status_done_tstamp']
+                    response = logs_client.filter_log_events(
+                        logGroupName=log_group_name,
+                        filterPattern=f"\"REPORT RequestId: {activation_id}\"",
+                        startTime=int(start_time * 1000),
+                        endTime=int(end_time * 1000),
+                    )
+                    if response['events']:
+                        for event in response['events']:
+                            message = event['message']
+                            print(f"Log Message: {message}")
 
-                                # Search for the billed duration in the log message
-                                if activation_id in message:
-                                    # Add message to the invoke stats and update in job
-                                    invoke_stats[i]['log_message'] = message
-                                    break
-                        else:
-                            time.sleep(5)
-                            count += 1
-                job.output['lithops_stats'] = invoke_stats
-        except Exception as e:
-            logger.error(f"Error getting cloudwatch report: {e}")
-            return None
-
+                            # Search for the billed duration in the log message
+                            if activation_id in message:
+                                # Add message to the invoke stats and update in job
+                                invoke_stats[i]['log_message'] = message
+                                break
+                    else:
+                        time.sleep(1)
+                        count += 1
+            job.output['lithops_stats'] = invoke_stats
         return job
 
-
-    def lithops_wait_futures(self, fexec: FunctionExecutor, futures: list, timeout: int = None,
-                             exception_str: bool = True):
+    def wait_futures(self, fexec: FunctionExecutor, futures: list, timeout: int = None,
+                     exception_str: bool = True):
         '''
         Waits for the futures of the task managers.
         :param fexec: FunctionExecutor. The function executor to be used
@@ -433,22 +399,12 @@ class ResourceProvisioner():
         Calls the function executor with the payloads. If the function executor is not provided, it calls the local function.
         :param fexec: FunctionExecutor. The function executor to be used
         '''
-        if fexec:
+        if fexec.backend != 'localhost':
             futures = self.lithops_call(fexec=fexec, payloads=payloads)
             return futures
         else:
-            futures = self.local_call(payloads=payloads)
+            futures = self.local_call(fexec=fexec, payloads=payloads)
             return futures
-
-    def wait_futures(self, fexec, futures: list):
-        '''
-        Waits for the futures of the task managers.
-        :param fexec: FunctionExecutor. The function executor to be used
-        '''
-        if fexec:
-            return self.lithops_wait_futures(fexec=fexec, futures=futures)
-        else:
-            return self.local_wait_futures(futures=futures)
 
     def invoke(self, fexec, payloads: list):
         """
@@ -459,10 +415,9 @@ class ResourceProvisioner():
         """
         if fexec:
             futures = self.lithops_call(fexec=fexec, payloads=payloads)
-            return self.lithops_wait_futures(fexec=fexec, futures=futures)
         else:
             futures = self.local_call(payloads=payloads)
-            return self.wait_futures(futures=futures)
+        return self.wait_futures(futures=futures)
 
     def save_output(self, fexec, job):
         '''
@@ -1297,9 +1252,8 @@ class JobManager:
 
         if self.job.dynamic_split: self.initialize_dynamic_job()
 
-        self.fexec = None
+        self.fexec = FunctionExecutor(**self.fexec_args)
         if self.job.orchestrator_backend != "local":
-            self.fexec = FunctionExecutor(**self.fexec_args)
             if not self.job.bucket:
                 self.job.bucket = self.fexec.config['aws_s3']['storage_bucket']
         else:
@@ -1324,9 +1278,7 @@ class JobManager:
 
         self.job.orchestrator_stats["finished"] = time.time()
         if self.job.get_cloudwatch_report:
-            logger.info(f"Getting CloudWatch report.")
             self.job = self.resource_provisioner.get_cloudwatch_report(self.fexec, self.job)
-            logger.info(f"CloudWatch report received.")
         self.resource_provisioner.save_output(self.fexec, self.job)
         if self.job.orchestrator_backend == "local":
             os.remove(f'/tmp/off_sample_orchestrator/{filename}')
@@ -1367,7 +1319,7 @@ class Orchestrator:
     """
 
     def __init__(self,
-                 fexec_args: dict = None,
+                 fexec_args: dict = {},
                  orchestrator_backends: list = ORCHESTRATOR_BACKENDS,
                  initialize=True,
                  job_policy=default_job_policy,
@@ -1419,6 +1371,7 @@ class Orchestrator:
         self.resource_provisioner = ResourceProvisioner(job_policy, max_job_managers, max_task_managers)
 
         self.fexec_args = fexec_args
+        self.ec_2_metadata = None
         if AWS_LAMBDA_BACKEND in orchestrator_backends:
             if ec2_host_machine:
                 self.ec_2_metadata = self.resource_provisioner.get_ec2_metadata()
@@ -1426,8 +1379,6 @@ class Orchestrator:
                 logger.info(f"EC2 metadata: {self.ec_2_metadata}")
                 self.fexec_args['vpc'] = {'subnets': [self.ec_2_metadata['subnet_id']],
                                           'security_groups': [self.ec_2_metadata['security_group_id']]}
-            else:
-                self.ec_2_metadata = None
 
         self.job_queue = Queue()
         self.stop_server_flag = threading.Event()
