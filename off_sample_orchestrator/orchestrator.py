@@ -1414,7 +1414,7 @@ class Orchestrator:
                 logger.info(f'Testing call')
                 lithops_futures = self.resource_provisioner.lithops_call(fexec,
                                                                          payloads=[{'body': {'do_nothing': True}}])
-                lithops_results = self.resource_provisioner.lithops_wait_futures(fexec, futures=lithops_futures,
+                lithops_results = self.resource_provisioner.wait_futures(fexec, futures=lithops_futures,
                                                                                  timeout=30, exception_str=False)
                 if isinstance(lithops_results, Exception):
                     logger.info(f"Runtime {fexec.backend} found but not working.")
@@ -1449,7 +1449,7 @@ class Orchestrator:
         logger.info(f"Runtime {self.fexec_args['runtime']} not found. Creating runtime...")
         if initialize:
             lithops_futures = self.resource_provisioner.lithops_call(fexec, payloads=[{'body': {'do_nothing': True}}])
-            lithops_results = self.resource_provisioner.lithops_wait_futures(fexec, futures=lithops_futures, timeout=30,
+            lithops_results = self.resource_provisioner.wait_futures(fexec, futures=lithops_futures, timeout=30,
                                                                              exception_str=False)
             logger.info(f"Runtime created and returned: {lithops_results}")
         if not exists_included_function:
