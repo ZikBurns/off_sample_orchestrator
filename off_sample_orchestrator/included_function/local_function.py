@@ -12,52 +12,6 @@ from .grpc_assets import split_grpc_pb2_grpc
 
 CONNECTION_RETRIES = 10
 
-start = time.time()
-jit_model = torch.jit.load("/tmp/off_sample_orchestrator/model.pt", torch.device('cpu'))
-print(f"Model loading took {time.time() - start} seconds")
-resources = PredictResource()
-
-BUCKET = "off-sample-eu"
-config_dict = {
-    'load': {'batch_size': 0, 'max_concurrency': 0},
-    'preprocess': {'batch_size': 0, 'num_cpus': 0},
-    'predict': {'interop': 0, 'intraop': 0, 'n_models': 0}
-}
-manager = TaskManager(config_dict=config_dict, logging_level=logging.ERROR)
-@manager.task(mode="threading")
-def load(image_dict):
-    result_dict = {}
-    for key in image_dict:
-        # print(f"Downloading image {key} from disk")
-        image_data = resources.downloadimage(key, s3_bucket=BUCKET )
-        # print("Downloading image finished")
-        result_dict.update({key: image_data})
-    return result_dict
-
-@manager.task(mode="multiprocessing", previous=load, batch_format="bytes")
-def preprocess(image_dict):
-    result_dict = {}
-    for key, value in image_dict.items():
-        # print("Transformation started", key)
-        tensor = resources.transform_image(value)
-        result_dict.update({key: tensor})
-        # print("Transformation finished", key)
-    return result_dict
-
-
-@manager.task(mode="torchscript", previous=preprocess, batch_format="tensor", jit_model=jit_model)
-def predict(tensor_dicts, ensemble):
-    # print("Predicting images")
-    tensors = []
-    for key, value in tensor_dicts.items():
-        tensors.append(value)
-    prediction_results = OffSampleTorchscriptFork(ensemble).predict(tensors)
-    result_dict = {}
-    for key, prediction_result in zip(tensor_dicts.keys(), prediction_results):
-        result_dict.update({key: prediction_result})
-    return result_dict
-
-
 def request_split(stub, finished_urls, tid, sid):
     retries = 0
     while retries < CONNECTION_RETRIES:
@@ -72,7 +26,7 @@ def request_split(stub, finished_urls, tid, sid):
     print("Failed to connect to gRPC server")
     return None
 
-def process_batches(batch, config_dict):
+def process_batches(manager, batch, config_dict):
     if isinstance(batch, dict):
         batch = list(batch.items())
     input_dicts = {}
@@ -83,15 +37,51 @@ def process_batches(batch, config_dict):
     print(f"Finished processing: {prediction_dicts}")
     return prediction_dicts, time_log
 
-
-
-
-
 def default_function(id, payload, storage):
-    global config_dict
-    global manager
+    jit_model = torch.jit.load("/tmp/off_sample_orchestrator/model.pt", torch.device('cpu'))
+    resources = PredictResource()
+
+    BUCKET = "off-sample-eu"
+    config_dict = {
+        'load': {'batch_size': 0, 'max_concurrency': 0},
+        'preprocess': {'batch_size': 0, 'num_cpus': 0},
+        'predict': {'interop': 0, 'intraop': 0, 'n_models': 0}
+    }
+    manager = TaskManager(config_dict=config_dict, logging_level=logging.ERROR)
+
+    @manager.task(mode="threading")
+    def load(image_dict):
+        result_dict = {}
+        for key in image_dict:
+            # print(f"Downloading image {key} from disk")
+            image_data = resources.downloadimage(key, s3_bucket=BUCKET)
+            # print("Downloading image finished")
+            result_dict.update({key: image_data})
+        return result_dict
+
+    @manager.task(mode="multiprocessing", previous=load, batch_format="bytes")
+    def preprocess(image_dict):
+        result_dict = {}
+        for key, value in image_dict.items():
+            # print("Transformation started", key)
+            tensor = resources.transform_image(value)
+            result_dict.update({key: tensor})
+            # print("Transformation finished", key)
+        return result_dict
+
+    @manager.task(mode="torchscript", previous=preprocess, batch_format="tensor", jit_model=jit_model)
+    def predict(tensor_dicts, ensemble):
+        # print("Predicting images")
+        tensors = []
+        for key, value in tensor_dicts.items():
+            tensors.append(value)
+        prediction_results = OffSampleTorchscriptFork(ensemble).predict(tensors)
+        result_dict = {}
+        for key, prediction_result in zip(tensor_dicts.keys(), prediction_results):
+            result_dict.update({key: prediction_result})
+        return result_dict
+
     tid = None
-    global BUCKET
     print("Function started")
     try:
         if "WARM_START_FLAG" in os.environ:
@@ -126,7 +116,7 @@ def default_function(id, payload, storage):
         time_logs = []
         if 'split' in payload:
             batch = payload['split']
-            prediction_dicts, time_logs = process_batches(batch, config_dict)
+            prediction_dicts, time_logs = process_batches(manager, batch, config_dict)
             result = {'predictions': prediction_dicts}
         else:
             tid = payload['tid']
@@ -153,7 +143,7 @@ def default_function(id, payload, storage):
                             print("Raising exception")
                             raise Exception("Test exception")
                     if batch:
-                        prediction_dicts, time_log = process_batches(batch, config_dict)
+                        prediction_dicts, time_log = process_batches(manager, batch, config_dict)
                         time_logs.append(time_log)
                         for key, result in prediction_dicts.items():
                             rpc_dict = split_grpc_pb2.Dict(key=key, value=str(result))

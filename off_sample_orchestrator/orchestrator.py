@@ -74,7 +74,8 @@ class Job:
                  keep_alive: bool = KEEP_ALIVE,
                  keep_alive_interval: int = KEEP_ALIVE_INTERVAL,
                  local_model_path: str = LOCAL_MODEL_PATH,
-                 get_cloudwatch_report=True
+                 get_cloudwatch_report=True,
+                 local_function=None
                  ):
         self.input = input
         if not job_name:
@@ -130,6 +131,8 @@ class Job:
         self.keep_alive = keep_alive
         self.keep_alive_interval = keep_alive_interval
         self.get_cloudwatch_report = get_cloudwatch_report
+        # Check that if the orchestrator_backend is local, the local_function is not None
+        self.local_function = local_function
 
     def to_dict(self):
         '''
@@ -264,60 +267,6 @@ class ResourceProvisioner():
         job = self.job_policy(job)
         return job
 
-    def local_call(self, fexec: FunctionExecutor, payloads: list):
-        '''
-        Calls a pool of local task managers with the payloads
-        :param payloads: list. The payloads to be sent to the task managers
-        :return: list. The results of the task managers
-        '''
-        num_task_managers = len(payloads)
-        try:
-            payload_list = []
-            for payload in payloads:
-                payload_list.append({'payload': payload})
-            logger.info(f"Calling {num_task_managers} task managers.")
-            from .included_function.local_function import default_function
-            futures = fexec.map(map_function=default_function, map_iterdata=payload_list)
-            return futures
-        except Exception as e:
-            if exception_str:
-                try:
-                    e = str(e)
-                except Exception as e2:
-                    pass
-            logger.error(f"Error in lithops call: {e}")
-            logger.error(
-                f"Depending on the error, you may need to redeploy the runtime. Use the redeploy_runtime method of the orchestrator.")
-            return e
-
-    def lithops_call(self, fexec: FunctionExecutor, payloads: list, exception_str: bool = True):
-        '''
-        Calls map_async of lithops with the payloads
-        :param fexec: FunctionExecutor. The lithops function executor
-        :param payloads: list. The payloads to be sent to the task managers
-        :param timeout: int. The timeout for the call
-        :param exception_str: bool. True if the exception should be returned as a string, False otherwise
-        :return: dict. The results of the task managers
-        '''
-        num_task_managers = len(payloads)
-        try:
-            payload_list = []
-            for payload in payloads:
-                payload_list.append({'payload': payload})
-            logger.info(f"Calling {num_task_managers} task managers.")
-            futures = fexec.map_async(map_iterdata=payload_list)
-            return futures
-        except Exception as e:
-            if exception_str:
-                try:
-                    e = str(e)
-                except Exception as e2:
-                    pass
-            logger.error(f"Error in lithops call: {e}")
-            logger.error(
-                f"Depending on the error, you may need to redeploy the runtime. Use the redeploy_runtime method of the orchestrator.")
-            return e
-
     def get_cloudwatch_report(self, fexec: FunctionExecutor, job):
         session = fexec.compute_handler.backend.aws_session
         logs_client = session.client('logs', region_name='eu-west-1')
@@ -388,36 +337,32 @@ class ResourceProvisioner():
                 f"Depending on the error, you may need to redeploy the runtime. Use the redeploy_runtime method of the orchestrator.")
         return lithops_results
 
-    # def get_billed_duration(self, fexec, futures):
-    #     try:
-    #         fexec.job_cost(futures)
-    #     except Exception as e:
-    #         logger.error(f"Error getting billed duration: {e}")
-
-    def call(self, fexec, payloads: list):
+    def call(self, fexec, payloads: list, local_function=None, exception_str: bool = True):
         '''
         Calls the function executor with the payloads. If the function executor is not provided, it calls the local function.
         :param fexec: FunctionExecutor. The function executor to be used
         '''
-        if fexec.backend != 'localhost':
-            futures = self.lithops_call(fexec=fexec, payloads=payloads)
+        num_task_managers = len(payloads)
+        try:
+            payload_list = []
+            for payload in payloads:
+                payload_list.append({'payload': payload})
+            logger.info(f"Calling {num_task_managers} task managers.")
+            if fexec.backend == 'localhost':
+                futures = fexec.map(map_function=local_function, map_iterdata=payload_list)
+            else:
+                futures = fexec.map_async(map_iterdata=payload_list)
             return futures
-        else:
-            futures = self.local_call(fexec=fexec, payloads=payloads)
-            return futures
-
-    def invoke(self, fexec, payloads: list):
-        """
-        Invokes the function executor with the payloads. If the function executor is not provided, it calls the local function.
-        :param fexec: FunctionExecutor. The function executor to be used
-        :param payloads: list. The payloads to be sent to the task managers
-        :return: dict. The results of the task managers
-        """
-        if fexec:
-            futures = self.lithops_call(fexec=fexec, payloads=payloads)
-        else:
-            futures = self.local_call(payloads=payloads)
-        return self.wait_futures(futures=futures)
+        except Exception as e:
+            if exception_str:
+                try:
+                    e = str(e)
+                except Exception as e2:
+                    pass
+            logger.error(f"Error in lithops call: {e}")
+            logger.error(
+                f"Depending on the error, you may need to redeploy the runtime. Use the redeploy_runtime method of the orchestrator.")
+            return e
 
     def save_output(self, fexec, job):
         '''
@@ -1234,7 +1179,7 @@ class JobManager:
             if self.job.orchestrator_backend != "local":
                 payload['body']['bucket'] = self.job.bucket
             payload_list.append(payload)
-        futures = self.resource_provisioner.call(self.fexec, payload_list)
+        futures = self.resource_provisioner.call(self.fexec, payload_list, self.job.local_function)
         self.job.num_task_managers += num_extra_task_managers
         self.extra_futures.extend(futures)
         logger.info(f"Extra task managers added.")
@@ -1264,7 +1209,7 @@ class JobManager:
 
         payload = self.build_payload()
         self.job.orchestrator_stats["started"] = time.time()
-        futures = self.resource_provisioner.call(self.fexec, payload)
+        futures = self.resource_provisioner.call(self.fexec, payload, self.job.local_function)
         invoke_output = self.resource_provisioner.wait_futures(self.fexec, futures)
 
         if self.job.dynamic_split:
@@ -1330,7 +1275,7 @@ class Orchestrator:
                  max_port=MAX_PORT,
                  split_enumerator_thread_pool_size: int = SPLIT_ENUMERATOR_THREAD_POOL_SIZE,
                  logging_level=logging.INFO,
-                 job_pool_executor=ProcessPoolExecutor()
+                 job_pool_executor=ProcessPoolExecutor(),
                  ):
         # Set the logger configuration
         logging.basicConfig(
@@ -1387,13 +1332,15 @@ class Orchestrator:
         self.job_pool_executor = job_pool_executor
 
         self.learning_plane = LearningPlane()
-        if initialize and AWS_LAMBDA_BACKEND in orchestrator_backends:
-            if self.check_runtime_status(fexec=None, double_check=True):
-                logger.info(f"Runtime is available")
-            else:
-                logger.info(f"Runtime is not available")
-                self.redeploy_runtime(fexec=None)
-
+        if initialize:
+            if AWS_LAMBDA_BACKEND in orchestrator_backends:
+                if self.check_runtime_status(fexec=None, double_check=True):
+                    logger.info(f"Runtime is available")
+                else:
+                    logger.info(f"Runtime is not available")
+                    self.redeploy_runtime(fexec=None)
+            elif LOCAL_BACKEND in orchestrator_backends:
+                self.copy_default_included_function()
         logger.info(f"Orchestrator initialized")
 
     def check_runtime_status(self, fexec: FunctionExecutor = None, double_check: bool = True):
@@ -1412,10 +1359,10 @@ class Orchestrator:
             if double_check:
                 logger.info(f"Runtime {fexec.backend} found.")
                 logger.info(f'Testing call')
-                lithops_futures = self.resource_provisioner.lithops_call(fexec,
+                lithops_futures = self.resource_provisioner.call(fexec,
                                                                          payloads=[{'body': {'do_nothing': True}}])
                 lithops_results = self.resource_provisioner.wait_futures(fexec, futures=lithops_futures,
-                                                                                 timeout=30, exception_str=False)
+                                                                         timeout=30, exception_str=False)
                 if isinstance(lithops_results, Exception):
                     logger.info(f"Runtime {fexec.backend} found but not working.")
                     return False
@@ -1433,7 +1380,16 @@ class Orchestrator:
             fexec = FunctionExecutor(**self.fexec_args)
         fexec.compute_handler.delete_runtime(fexec.config['aws_lambda']['runtime'],
                                              fexec.config['aws_lambda']['runtime_memory'])
-        exists_included_function = True
+        exists_included_function = self.copy_default_included_function()
+
+        logger.info(f"Runtime {self.fexec_args['runtime']} not found. Creating runtime...")
+        if initialize:
+            lithops_futures = self.resource_provisioner.call(fexec, payloads=[{'body': {'do_nothing': True}}])
+            lithops_results = self.resource_provisioner.wait_futures(fexec, futures=lithops_futures, timeout=30,
+                                                                     exception_str=False)
+            logger.info(f"Runtime created and returned: {lithops_results}")
+
+    def copy_default_included_function(self):
         if not os.path.isdir("included_function"):
             exists_included_function = False
             logger.info(f"Using default included_function")
@@ -1446,15 +1402,8 @@ class Orchestrator:
             shutil.copytree(f"{current_dir}/included_function", f"{cwd}/included_function")
         else:
             logger.info(f"Using included_function found in the current directory")
-        logger.info(f"Runtime {self.fexec_args['runtime']} not found. Creating runtime...")
-        if initialize:
-            lithops_futures = self.resource_provisioner.lithops_call(fexec, payloads=[{'body': {'do_nothing': True}}])
-            lithops_results = self.resource_provisioner.wait_futures(fexec, futures=lithops_futures, timeout=30,
-                                                                             exception_str=False)
-            logger.info(f"Runtime created and returned: {lithops_results}")
-        if not exists_included_function:
-            # Remove the included_function directory
-            shutil.rmtree(f"{cwd}/included_function")
+            exists_included_function = True
+        return exists_included_function
 
     def delete_runtime(self):
         '''
