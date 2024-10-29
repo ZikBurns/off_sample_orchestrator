@@ -4,10 +4,6 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 # Dynamic split (True) or static split (False)
 DYNAMIC_SPLIT = True
 
-# Minimum and maximum port for the split enumerator to use
-MIN_PORT = 49152
-MAX_PORT = 65535
-
 # Max number of threads to use for the split enumerator
 SPLIT_ENUMERATOR_THREAD_POOL_SIZE = 1000
 

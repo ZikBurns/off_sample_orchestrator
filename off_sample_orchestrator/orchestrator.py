@@ -16,7 +16,7 @@ from .included_function.grpc_assets.split_grpc_pb2 import splitResponse
 from .included_function.grpc_assets.split_grpc_pb2_grpc import SPLITRPCServicer, add_SPLITRPCServicer_to_server
 import grpc
 from lithopserve import FunctionExecutor
-from .constants import MIN_PORT, MAX_PORT, MAX_JOB_MANAGERS, MAX_TASK_MANAGERS, \
+from .constants import MAX_JOB_MANAGERS, MAX_TASK_MANAGERS, \
     DEFAULT_IP, DYNAMIC_SPLIT, SPLIT_ENUMERATOR_THREAD_POOL_SIZE, DEFAULT_ORCHESTRATOR, \
     ORCHESTRATOR_BACKENDS, EC2_HOST_MACHINE, OUTPUT_STORAGE, DEFAULT_TASK_MANAGER_CONFIG, EC2_METADATA_SERVICE, \
     SPECULATIVE_EXECUTION, SPECULATION_MULTIPLIER, SPECULATION_QUARTILE, SPECULATION_INTERVAL_MS, MAX_SPLIT_RETRIES, \
@@ -305,6 +305,59 @@ class ResourceProvisioner():
                         count += 1
             job.output['lithops_stats'] = invoke_stats
         return job
+
+    def lithops_call(self, fexec: FunctionExecutor, payloads: list, exception_str: bool = True):
+        '''
+        Calls map_async of lithops with the payloads
+        :param fexec: FunctionExecutor. The lithops function executor
+        :param payloads: list. The payloads to be sent to the task managers
+        :param timeout: int. The timeout for the call
+        :param exception_str: bool. True if the exception should be returned as a string, False otherwise
+        :return: dict. The results of the task managers
+        '''
+        num_task_managers = len(payloads)
+        try:
+            payload_list = []
+            for payload in payloads:
+                payload_list.append({'payload': payload})
+            logger.info(f"Calling {num_task_managers} task managers.")
+            futures = fexec.map_async(map_iterdata=payload_list)
+            return futures
+        except Exception as e:
+            if exception_str:
+                try:
+                    e = str(e)
+                except Exception as e2:
+                    pass
+            logger.error(f"Error in lithops call: {e}")
+            logger.error(
+                f"Depending on the error, you may need to redeploy the runtime. Use the redeploy_runtime method of the orchestrator.")
+            return e
+
+    def local_call(self, fexec: FunctionExecutor, payloads: list, local_function=None):
+        '''
+        Calls a pool of local task managers with the payloads
+        :param payloads: list. The payloads to be sent to the task managers
+        :return: list. The results of the task managers
+        '''
+        num_task_managers = len(payloads)
+        try:
+            payload_list = []
+            for payload in payloads:
+                payload_list.append({'payload': payload})
+            logger.info(f"Calling {num_task_managers} task managers.")
+            futures = fexec.map(map_function=local_function, map_iterdata=payload_list)
+            return futures
+        except Exception as e:
+            if exception_str:
+                try:
+                    e = str(e)
+                except Exception as e2:
+                    pass
+            logger.error(f"Error in lithops call: {e}")
+            logger.error(
+                f"Depending on the error, you may need to redeploy the runtime. Use the redeploy_runtime method of the orchestrator.")
+            return e
 
     def wait_futures(self, fexec: FunctionExecutor, futures: list, timeout: int = None,
                      exception_str: bool = True):
@@ -1256,8 +1309,6 @@ class Orchestrator:
     :param max_task_managers: int. The maximum number of task managers to be used
 
     Secondary Parameters:
-    :param min_port: int. The minimum port to be used
-    :param max_port: int. The maximum port to be used
     :param split_enumerator_thread_pool_size: int. The thread pool size for the split enumerator
     :param logging_level: int. The logging level
     :param job_pool_executor: Executor. The executor to be used in the job pool
@@ -1271,8 +1322,6 @@ class Orchestrator:
                  ec2_host_machine: bool = EC2_HOST_MACHINE,
                  max_job_managers=MAX_JOB_MANAGERS,
                  max_task_managers=MAX_TASK_MANAGERS,
-                 min_port=MIN_PORT,
-                 max_port=MAX_PORT,
                  split_enumerator_thread_pool_size: int = SPLIT_ENUMERATOR_THREAD_POOL_SIZE,
                  logging_level=logging.INFO,
                  job_pool_executor=ProcessPoolExecutor(),
@@ -1289,14 +1338,6 @@ class Orchestrator:
             raise ValueError(
                 f"Invalid orchestrator_backend: {orchestrator_backends}. Must be of {ORCHESTRATOR_BACKENDS}")
         self.orchestrator_backends = orchestrator_backends
-
-        # Check if the port range is valid
-        if min_port > max_port or max_port > 65535 or min_port > 65535 or min_port < 0 or max_port < 0:
-            raise ValueError(f"Invalid port range: {min_port} - {max_port}. Must be between 0 and 65535")
-        self.min_port = min_port
-        self.max_port = max_port
-        self.next_available_port = min_port
-        self.update_port()
 
         # Check if the thread pool size is valid
         if split_enumerator_thread_pool_size < 1:
@@ -1359,7 +1400,7 @@ class Orchestrator:
             if double_check:
                 logger.info(f"Runtime {fexec.backend} found.")
                 logger.info(f'Testing call')
-                lithops_futures = self.resource_provisioner.call(fexec,
+                lithops_futures = self.resource_provisioner.lithops_call(fexec,
                                                                          payloads=[{'body': {'do_nothing': True}}])
                 lithops_results = self.resource_provisioner.wait_futures(fexec, futures=lithops_futures,
                                                                          timeout=30, exception_str=False)
@@ -1384,7 +1425,7 @@ class Orchestrator:
 
         logger.info(f"Runtime {self.fexec_args['runtime']} not found. Creating runtime...")
         if initialize:
-            lithops_futures = self.resource_provisioner.call(fexec, payloads=[{'body': {'do_nothing': True}}])
+            lithops_futures = self.resource_provisioner.lithops_call(fexec, payloads=[{'body': {'do_nothing': True}}])
             lithops_results = self.resource_provisioner.wait_futures(fexec, futures=lithops_futures, timeout=30,
                                                                      exception_str=False)
             logger.info(f"Runtime created and returned: {lithops_results}")
@@ -1428,19 +1469,16 @@ class Orchestrator:
         job = self.job_queue.get()
         return job
 
-    def update_port(self):
+    def get_available_port(self):
         """
-        Updates the next_available_port to the next port in the range.
+        Gets an available port to be used by the Job Manager.
         """
         while True:
-            # Assign random port in the range
-            port = random.randint(self.min_port, self.max_port)
-            # Check if the port is available
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 try:
-                    sock.bind(("localhost", port))
-                    self.next_available_port = port
-                    return port
+                    sock.bind(('', 0))
+                    assigned_port = sock.getsockname()[1]
+                    return assigned_port
                 except Exception as e:
                     logger.info(f"Port {port} is not available. Trying another port.")
                     continue
@@ -1496,13 +1534,14 @@ class Orchestrator:
         :param job: Job. The job to be processed
         :return: future. The future of the Job Manager
         '''
+        available_port = self.get_available_port()
         job.ec2_metadata = self.ec_2_metadata
         job_manager = JobManager(fexec_args=self.fexec_args, job=job, resource_provisioner=self.resource_provisioner,
                                  split_enumerator_thread_pool_size=self.split_enumerator_thread_pool_size,
-                                 split_enumerator_port=self.next_available_port)
+                                 split_enumerator_port=available_port)
 
         future = self.job_pool_executor.submit(job_manager.run)
-        self.update_port()
+
         return future
 
     def force_cold_start(self, sleep_time=600):
