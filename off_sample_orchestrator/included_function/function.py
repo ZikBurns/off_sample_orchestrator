@@ -109,8 +109,8 @@ def default_function(id, payload, storage):
             payload = json.loads(payload)
         print(f"Payload: {payload}")
 
-        if 'do_nothing' in payload:
-            if payload['do_nothing']:
+        if 'ping' in payload:
+            if payload['ping']:
                 return {
                     'statusCode': 200,
                     'body': "Function just returns after loading dependencies"
