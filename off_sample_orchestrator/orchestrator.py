@@ -1473,6 +1473,8 @@ class Orchestrator:
         """
         Gets an available port to be used by the Job Manager that is also valid for gRPC.
         """
+        ip = self.ec_2_metadata["ip"] if self.ec_2_metadata else None
+
         while True:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 try:
@@ -1484,7 +1486,7 @@ class Orchestrator:
             # Now test the port with gRPC
             try:
                 test_server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))
-                port_binding = test_server.add_insecure_port(f'{self.job.ip}:{assigned_port}')
+                port_binding = test_server.add_insecure_port(f'{ip}:{assigned_port}')
                 if port_binding == 0:
                     logger.info(f"Port {assigned_port} cannot be used by gRPC. Trying another.")
                     continue  # gRPC could not bind to the port
@@ -1546,6 +1548,7 @@ class Orchestrator:
         :param job: Job. The job to be processed
         :return: future. The future of the Job Manager
         '''
+
         available_port = self.get_available_port()
         job.ec2_metadata = self.ec_2_metadata
         job_manager = JobManager(fexec_args=self.fexec_args, job=job, resource_provisioner=self.resource_provisioner,
