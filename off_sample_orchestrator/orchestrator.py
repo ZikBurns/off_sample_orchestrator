@@ -1471,17 +1471,29 @@ class Orchestrator:
 
     def get_available_port(self):
         """
-        Gets an available port to be used by the Job Manager.
+        Gets an available port to be used by the Job Manager that is also valid for gRPC.
         """
         while True:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 try:
                     sock.bind(('', 0))
                     assigned_port = sock.getsockname()[1]
+                except Exception:
+                    continue  # Try another port if binding fails
+
+            # Now test the port with gRPC
+            try:
+                test_server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))
+                port_binding = test_server.add_insecure_port(f'{self.job.ip}:{assigned_port}')
+                if port_binding == 0:
+                    logger.info(f"Port {assigned_port} cannot be used by gRPC. Trying another.")
+                    continue  # gRPC could not bind to the port
+                else:
+                    test_server.stop(0)  # Clean up the test server
                     return assigned_port
-                except Exception as e:
-                    logger.info(f"Port {port} is not available. Trying another port.")
-                    continue
+            except Exception as e:
+                logger.info(f"Port {assigned_port} caused gRPC error ({e}). Trying another.")
+                continue
 
     def run_orchestrator(self):
         '''
