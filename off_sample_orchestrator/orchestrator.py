@@ -75,7 +75,8 @@ class Job:
                  keep_alive_interval: int = KEEP_ALIVE_INTERVAL,
                  local_model_path: str = LOCAL_MODEL_PATH,
                  get_cloudwatch_report=True,
-                 local_function=None
+                 local_function=None,
+                 heterogeneous_splits = None
                  ):
         self.input = input
         if not job_name:
@@ -133,6 +134,7 @@ class Job:
         self.get_cloudwatch_report = get_cloudwatch_report
         # Check that if the orchestrator_backend is local, the local_function is not None
         self.local_function = local_function
+        self.heterogeneous_splits = heterogeneous_splits
 
     def to_dict(self):
         '''
@@ -921,12 +923,16 @@ class SplitController():
     :param max_split_retries: int. The maximum number of retries for a split
     '''
 
-    def __init__(self, job_input, split_size, max_split_retries):
+    def __init__(self, job_input, split_size, max_split_retries, heterogeneous_splits=None):
         self.pending_queue = Queue()
         self.running_splits = ThreadSafeDict()
         self.done_splits = ThreadSafeDict()
         split_inputs = [job_input[i:i + split_size] for i in range(0, len(job_input), split_size)]
         self.splits = [Split(str(i + 1), split) for i, split in enumerate(split_inputs)]
+
+        if heterogeneous_splits:
+            self.splits = [Split(str(i + 1), split) for i, split in enumerate(heterogeneous_splits)]
+
         self.split_size = split_size
         self.max_split_retries = max_split_retries
         logger.info(f"Created {len(self.splits)} splits with size {split_size}")
@@ -1195,7 +1201,7 @@ class JobManager:
         """
         if self.job.ec2_metadata:
             self.job.ip = self.job.ec2_metadata["ip"]
-        self.split_controller = SplitController(self.job.input, self.job.split_size, self.job.max_split_retries)
+        self.split_controller = SplitController(self.job.input, self.job.split_size, self.job.max_split_retries,  self.job.heterogeneous_splits)
         self.extra_futures = ThreadSafeList()
         self.split_controller.initialize_pending_queue()
         self.start_server()
